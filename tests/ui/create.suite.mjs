@@ -58,6 +58,20 @@ run(async () => {
   await wait(300);
   ok(!dlg.open, 'no dialog at start');
 
+  // The toolbar button: at the selected commit, else at HEAD (WIP row or a
+  // stash selected counts as nothing).
+  const bb = $('#branchBtn');
+  ok(!bb.hidden && bb.getAttribute('aria-disabled') === 'false' && bb.title === 'Create branch at the selected commit, or HEAD', 'toolbar button on', bb.title);
+  $('#body .wip-row').click(); await wait(30);
+  bb.click(); await wait(30);
+  ok(dlg.open && $('#cTitle').textContent === 'Create branch' && $('#cHash').textContent === 'aaaaaaa', 'WIP selected: at HEAD', $('#cHash').textContent);
+  ok(!$('#cSwitchRow').hidden && $('#cMsgRow').hidden && document.activeElement === name, 'the same branch dialog');
+  key('Escape'); await wait(30);
+  msg('root').click(); await wait(30);
+  bb.click(); await wait(30);
+  ok(dlg.open && $('#cHash').textContent === 'bbbbbbb', 'a commit selected: at that commit', $('#cHash').textContent);
+  key('Escape'); await wait(30);
+
   // The WIP row is not a commit: nothing to create there.
   const wip = $('#body .wip-row');
   ok(!!wip, 'WIP row shown');
@@ -113,6 +127,9 @@ run(async () => {
   ok(last('create_branch') === JSON.stringify({ path: 'C:/fake/demo', name: 'topic', at: B, checkout: true }), 'create_branch with the full hash', last('create_branch'));
   ok($('#headName').textContent === 'Switching…', 'switching: the toolbar says so', $('#headName').textContent);
   ok($('#fetchBtn').getAttribute('aria-disabled') === 'true' && $('#fetchBtn').title === 'Creating branch…', 'Fetch off meanwhile', $('#fetchBtn').title);
+  ok(bb.getAttribute('aria-disabled') === 'true' && bb.title === 'Creating branch…', 'toolbar Create branch off meanwhile', bb.title);
+  bb.click(); await wait(30);
+  ok(!dlg.open, 'and clicking it opens nothing');
   ctx(msg('main work')); await wait(30);
   ok(labels() === 'Create branch here…(off),Create tag here…(off)', 'menu off while it runs', labels());
   const why = items().map(b => b.querySelector('.p')?.textContent).join(',');

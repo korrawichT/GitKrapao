@@ -47,8 +47,11 @@ run(async () => {
     command: 'git fetch --all --prune', stdout: '', stderr: '', summary: 'Fetched: already up to date.', ...extra });
   await wait(300);
   ok(!btn.hidden, 'fetch button shown in desktop mode');
-  const r = btn.getBoundingClientRect(), mid = (r.left + r.right) / 2;
-  ok(Math.abs(mid - innerWidth / 2) <= 1, 'fetch button in the middle of the toolbar', mid + ' vs ' + innerWidth / 2);
+  const r = $('.tb-mid').getBoundingClientRect(), mid = (r.left + r.right) / 2;
+  ok(Math.abs(mid - innerWidth / 2) <= 1 && $('.tb-mid').contains(btn) && $('.tb-mid').contains($('#branchBtn')),
+    'Fetch and Create branch in the middle of the toolbar', mid + ' vs ' + innerWidth / 2);
+  const bs = getComputedStyle(btn);
+  ok(bs.backgroundColor === 'rgba(0, 0, 0, 0)' && bs.borderTopColor === 'rgba(0, 0, 0, 0)', 'no background or border', bs.backgroundColor + ' / ' + bs.borderTopColor);
   ok(btn.textContent.trim() === '' && btn.getAttribute('aria-label') === 'Fetch' && btn.title === (f.remotes.length ? 'Fetch all remotes (Ctrl/⌘ Shift F)' : 'No remotes'),
     'icon only: name and tooltip', JSON.stringify([btn.textContent, btn.getAttribute('aria-label'), btn.title]));
   const theme = $('#themeBtn').getBoundingClientRect(), bar = $('.toolbar').getBoundingClientRect();

@@ -33,7 +33,11 @@
     <span class="stats" id="stats"></span>
     <div class="spacer"></div>
     </div>
-    <button class="btn icon-btn" id="fetchBtn" hidden aria-disabled="true" aria-label="Fetch" title="Fetch all remotes (Ctrl/⌘ Shift F)"><svg class="fetch-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 2.5h10M8 5v8.5M4.5 10 8 13.5l3.5-3.5"/></svg><span class="spin" aria-hidden="true"></span></button>
+    <div class="tb-mid">
+    <button class="btn icon-btn ghost" id="fetchBtn" hidden aria-disabled="true" aria-label="Fetch" title="Fetch all remotes (Ctrl/⌘ Shift F)"><svg class="fetch-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 2.5h10M8 5v8.5M4.5 10 8 13.5l3.5-3.5"/></svg><span class="spin" aria-hidden="true"></span></button>
+    <!-- the logo's trunk and one branch -->
+    <button class="btn icon-btn ghost" id="branchBtn" hidden aria-disabled="true" aria-label="Create branch" title="Create branch at the selected commit, or HEAD"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 14.5V1.5"/><path d="M4 12.5C4 9 12 10.5 12 6V3"/></svg></button>
+    </div>
     <div class="tb-r">
     <label class="search" title="Press / to search">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>

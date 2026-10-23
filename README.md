@@ -25,7 +25,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
   - A remote branch with no local copy gets a local branch that tracks it.
   - A local branch that is only behind its remote is fast-forwarded. One with its own commits is left as it is.
   - Uncommitted changes are never lost. If switching would overwrite them, the app asks whether to stash them first, untracked files included.
-- **Create branch or tag:** right-click a commit (or a label on it) and choose **Create branch here…** or **Create tag here…**.
+- **Create branch or tag:** right-click a commit (or a label on it) and choose **Create branch here…** or **Create tag here…**. The branch button next to Fetch, in the middle of the toolbar, creates a branch at the selected commit, or at HEAD when none is selected.
   - The name is checked as you type: one that is taken (in any letter case), that git would refuse, or that Windows cannot store as a file cannot be used. An existing branch or tag is never overwritten.
   - A new branch is switched to right away unless you untick **Switch to the new branch**; the switch works as above.
   - A tag with a message is an annotated tag, one without is lightweight. Tags are not signed.

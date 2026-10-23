@@ -761,7 +761,7 @@ function render(keepHash: string | null, keepScroll: { top: number; left: number
   updateView();
   renderSide();
 
-  sel = -1; runSearch();
+  sel = -1; runSearch(); updateBranchBtn();
   // A stash or pull request card stays put across syncs of the same repo.
   const show = !(keepHash && detailFor && detailFor.card);
   if (n && wipSel && wipOn()) {
@@ -792,7 +792,7 @@ function select(i: number, { scroll = false, open = false, detail: show = true }
     const c = S.commits[i]!, st = c.stashRow && stashes.find(x => x.key === c.stashKey);
     if (st) stashCard(st); else renderDetail(c);
   }
-  markSide();
+  markSide(); updateBranchBtn();
   if (scroll) ensureVisible(i);
   if (open) detail.classList.add('open');
   scheduleDraw();
@@ -1666,7 +1666,7 @@ function selectWip({ open = false }: { open?: boolean } = {}){
   sel = -1; wipSel = true;
   wipRow.classList.add('sel');
   wipCard();
-  markSide();
+  markSide(); updateBranchBtn();
   if (open) detail.classList.add('open');
   scheduleDraw();
 }
@@ -2685,6 +2685,7 @@ function updateFetchBtn(){
   // The operation first: a repo waiting for it shows no remotes yet.
   b.title = op ? OP_BUSY[op.kind] : none ? 'No remotes'
     : cap || 'Fetch all remotes (Ctrl/⌘ Shift F)';
+  updateBranchBtn();
   const off = opOff();
   $('#refreshBtn').setAttribute('aria-disabled', String(!!off));
   $('#refreshBtn').title = off || 'Refresh (Ctrl/⌘ R)';
@@ -2813,6 +2814,22 @@ function createEntries(c: Commit): CtxEntry[] {
     { label: 'Create branch here…', off, run: () => openCreate('branch', c) },
     { label: 'Create tag here…', off, run: () => openCreate('tag', c) },
   ];
+}
+
+/* The toolbar's Create branch: at the selected commit (not a stash row), else
+   at HEAD when it is loaded. The dialog names the commit either way. */
+function branchTarget(): Commit | undefined {
+  const c = sel >= 0 ? S.commits[sel] : undefined;
+  if (c && !c.stashRow) return c;
+  const h = current && S.refs && S.refs.headSha ? S.idx.get(S.refs.headSha) : undefined;
+  return h === undefined ? undefined : S.commits[h];
+}
+// Also run on select: with HEAD not in the graph, only a selection gives a target.
+function updateBranchBtn(){
+  if (!NATIVE) return;
+  const off = createOff() || (branchTarget() ? '' : 'No commit to branch from');
+  $('#branchBtn').setAttribute('aria-disabled', String(!!off));
+  $('#branchBtn').title = off || 'Create branch at the selected commit, or HEAD';
 }
 
 /* ---------- rename / delete a branch, delete a tag ---------- */
@@ -3119,6 +3136,8 @@ if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { retu
 if (NATIVE) {
   $('#refreshBtn').hidden = false;
   $('#fetchBtn').hidden = false;
+  $('#branchBtn').hidden = false;
+  $('#branchBtn').addEventListener('click', () => { const c = branchTarget(); if (c) openCreate('branch', c); });
   // aria-disabled instead of disabled, so the "No remotes" tooltip still shows.
   $('#fetchBtn').addEventListener('click', () => { if ($('#fetchBtn').getAttribute('aria-disabled') !== 'true') runFetch(); });
   $('#emptyOpen').addEventListener('click', pickRepo);
