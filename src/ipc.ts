@@ -28,9 +28,9 @@ export interface Commands {
   pull_requests: { args: { path: string }; result: PrList };
   open_url: { args: { url: string }; result: null };
   branch_tracking: { args: { path: string }; result: Track[] };
-  /** null while a fetch or switch runs in the repo: skip this poll. */
+  /** null while an operation (fetch, switch, create) runs in the repo: skip this poll. */
   repo_fingerprint: { args: { path: string }; result: string | null };
-  /** Rejects with 'busy' when a fetch or switch already runs in the repo. */
+  /** Rejects with 'busy' when an operation already runs in the repo. */
   fetch: { args: { path: string }; result: GitResult };
   list_remotes: { args: { path: string }; result: string[] };
   /** target: refs/heads/x or refs/remotes/<remote>/x. Rejects with 'busy' like fetch. */
