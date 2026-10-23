@@ -39,6 +39,14 @@ export interface Commands {
   create_branch: { args: { path: string; name: string; at: string; checkout: boolean }; result: GitResult };
   /** at: a commit hash; message: annotated tag, null: lightweight. Rejects with 'busy' like fetch. */
   create_tag: { args: { path: string; name: string; at: string; message: string | null }; result: GitResult };
+  /** from, to: short local branch names. Rejects with 'busy' like fetch. */
+  rename_branch: { args: { path: string; from: string; to: string }; result: GitResult };
+  /** name: a short local branch name. The backend asks before deleting; `deleted` carries the Undo token. */
+  delete_branch: { args: { path: string; name: string }; result: GitResult };
+  /** name: a short tag name. The backend asks (also about origin); `deleted` carries the Undo token. */
+  delete_tag: { args: { path: string; name: string }; result: GitResult };
+  /** token: from GitResult.deleted, valid in that repo (lock key) only, once. */
+  restore_ref: { args: { path: string; token: number }; result: GitResult };
 }
 
 const core = window.__TAURI__?.core;

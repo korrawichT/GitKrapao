@@ -32,9 +32,13 @@ export function nameProblem(name: string, kind: RefKind): string {
 
 /* The existing name (of the same kind) that `name` clashes with: the same
    name in another case (one file on Windows and macOS), or a name that
-   would be a folder of it or inside it (feat and feat/x). '' when none. */
-export function nameClash(name: string, kind: RefKind, names: string[]): string {
+   would be a folder of it or inside it (feat and feat/x). '' when none.
+   self: the branch being renamed. It is no clash (feat can become feat/x),
+   but a change of letter case only is: both are one file on Windows. */
+export function nameClash(name: string, kind: RefKind, names: string[], self?: string): string {
   const low = name.toLowerCase();
+  if (self !== undefined && name !== self && low === self.toLowerCase()) return 'Only the letter case changes; Windows stores both names as one file.';
+  if (self !== undefined) names = names.filter(n => n !== self);
   const same = names.find(n => n.toLowerCase() === low);
   if (same !== undefined) return `A ${kind} named ${same} already exists.`;
   const nested = names.find(n => { const m = n.toLowerCase(); return m.startsWith(low + '/') || low.startsWith(m + '/'); });

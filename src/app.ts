@@ -2,6 +2,7 @@ import { Syntax } from './highlight';
 import type { Token } from './highlight';
 import type { CommitDetail } from './bindings/CommitDetail';
 import type { GitResult } from './bindings/GitResult';
+import type { DeletedRef } from './bindings/DeletedRef';
 import type { FileChange } from './bindings/FileChange';
 import type { FileDiff } from './bindings/FileDiff';
 import type { DiffKind } from './ipc';
@@ -1246,9 +1247,9 @@ const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((h): h is 
 function hiddenList(path?: string){
   return strings(lsJSON<Record<string, unknown>>(HIDDEN_KEY, {})[repoKey(path)]);
 }
-function saveHidden(list: string[]){
+function saveHidden(list: string[], path?: string){
   const all = lsJSON<Record<string, string[]>>(HIDDEN_KEY, {});
-  if (list.length) all[repoKey()] = list; else delete all[repoKey()];
+  if (list.length) all[repoKey(path)] = list; else delete all[repoKey(path)];
   lsSet(HIDDEN_KEY, JSON.stringify(all));
 }
 const coveredBy = (ref: string, list: string[]) => list.find(h => h === ref || (h.endsWith('/') && ref.startsWith(h)));
@@ -1298,6 +1299,23 @@ function toggleIn(list: string[], ref: string){
   const cover = coveredBy(ref, list);
   if (cover) return list.filter(h => h !== cover);
   return [...list.filter(h => !(ref.endsWith('/') && h.startsWith(ref))), ref];
+}
+/* A branch was renamed (to) or deleted (null): its exact entries in the hide
+   and solo lists of each path follow it. Folder entries ("…/") stay as they
+   are. Returns true when a list changed. */
+function followRef(paths: string[], from: string, to: string | null){
+  const old = 'refs/heads/' + from, now = to === null ? [] : ['refs/heads/' + to];
+  let changed = false;
+  for (const path of new Set(paths)) {
+    const lists: [string[], (l: string[], p: string) => void][] = [[hiddenList(path), saveHidden], [soloList(path), saveSolo]];
+    for (const [list, save] of lists) {
+      if (!list.includes(old)) continue;
+      // A Set: a stale entry of the new name (a branch deleted outside the app) is not doubled.
+      save([...new Set(list.flatMap(h => h === old ? now : [h]))], path);
+      changed = true;
+    }
+  }
+  return changed;
 }
 // All off while an operation runs in the repo (opOff): the reload would have to wait for it.
 function toggleHidden(ref: string){ if (opOff()) return; saveHidden(toggleIn(hiddenList(), ref)); reloadForWalk(); }
@@ -2073,6 +2091,7 @@ sideList.addEventListener('contextmenu', e => {
   const entries: CtxEntry[] = [{ label: show ? 'Show' : 'Hide', off: opOff() || (solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : ''), run: () => toggleHidden(ref) }];
   if (leaf && NATIVE) entries.unshift({ label: `Switch to ${refLabel(ref)}`, off: switchOff(el.classList.contains('is-head')), run: () => runSwitch(ref) });
   if (leaf) entries.push({ label: 'Copy branch name', run: () => copyText(refLabel(ref)) });
+  if (leaf && ref.startsWith('refs/heads/')) entries.push(...branchEntries(ref.slice('refs/heads/'.length), el.classList.contains('is-head')));
   openCtx(e, entries, el);
 });
 /* Double-click a branch (panel or graph label) to switch to it. */
@@ -2087,11 +2106,20 @@ body.addEventListener('dblclick', e => {
 });
 /* The branch a graph label under the event stands for. A label is one ref
    group of its commit (data-g): one name, local and/or on remotes. */
-function pillGroup(e: Event): RefGroup | null {
+function pillAt(e: Event): RefGroup | null {
   const pill = (e.target as Element).closest<HTMLElement>('.pill'), host = pill && pill.closest<HTMLElement>('.row, .ref-pop');
   if (!pill || !host || host === wipRow) return null;
-  const c = S.commits[+host.dataset.i!], g = c && c.groups[+pill.dataset.g! || 0];
+  const c = S.commits[+host.dataset.i!];
+  return (c && c.groups[+pill.dataset.g! || 0]) || null;
+}
+function pillGroup(e: Event): RefGroup | null {
+  const g = pillAt(e);
   return g && g.kind === 'branch' && g.name !== 'HEAD (detached)' ? g : null;
+}
+/* A tag label (desktop only: its menu deletes it). */
+function pillTag(e: Event): RefGroup | null {
+  const g = NATIVE ? pillAt(e) : null;
+  return g && g.kind === 'tag' ? g : null;
 }
 /* The local branch when there is one; a group without it is on a remote. */
 const groupRef = (g: RefGroup) => g.local ? 'refs/heads/' + g.name : `refs/remotes/${g.remotes[0]}/${g.name}`;
@@ -2101,7 +2129,8 @@ function eventRow(e: Event): number {
   return host && host !== wipRow ? +host.dataset.i! : -1;   // rows and the box carry data-i
 }
 body.addEventListener('contextmenu', e => {
-  const g = pillGroup(e), i = eventRow(e), c = S.commits[i];
+  const g = pillGroup(e), tag = g ? null : pillTag(e), i = eventRow(e), c = S.commits[i];
+  if (tag) { openCtx(e, tagEntries(tag.name, c), null); return; }
   if (!g) {
     // Elsewhere on a commit row: create a branch or tag there. Over text
     // selected in the row, the WebView's own menu (Copy) stays instead.
@@ -2120,6 +2149,7 @@ body.addEventListener('contextmenu', e => {
     { label: 'Copy branch name', run: () => copyText(g.local ? g.name : `${g.remotes[0]}/${g.name}`) },
   ];
   if (NATIVE) entries.unshift({ label: `Switch to ${g.local ? g.name : `${g.remotes[0]}/${g.name}`}`, off: switchOff(g.head), run: () => runSwitch(groupRef(g)) });
+  if (g.local) entries.push(...branchEntries(g.name, g.head));
   if (c) entries.push(...createEntries(c));
   openCtx(e, entries, null);
 });
@@ -2185,6 +2215,35 @@ $('#sideBtn').addEventListener('click', () => showSide());
 function showError(msg: string){ $('#bannerMsg').textContent = msg; $('#banner').hidden = false; }
 function hideError(){ $('#banner').hidden = true; }
 $('#bannerClose').addEventListener('click', hideError);
+
+/* Undo bar: after a branch or tag was deleted in the active repo. It holds
+   the backend's token (the page never sees what to restore) and the repo's
+   lock key. It hides on ×, when any operation starts (runOp) and when the
+   repo is left (dropRepo); a new delete replaces it; syncs and reloads of
+   the same repo keep it. */
+const undoBar = $('#undoBar'), undoBtn = $<HTMLButtonElement>('#undoBtn');
+let undoFor: { d: DeletedRef; key: string } | null = null;
+function showUndo(d: DeletedRef, key: string){
+  undoFor = { d, key };
+  const what = `Deleted ${d.kind} ${d.name} (${d.short})`;
+  $('#undoMsg').textContent = d.onOrigin ? `${what} here and on origin. Undo restores it here only.` : what;
+  undoBar.hidden = false;
+}
+function hideUndo(){ undoFor = null; undoBar.hidden = true; }
+$('#undoClose').addEventListener('click', hideUndo);
+undoBtn.addEventListener('click', () => {
+  const u = undoFor;
+  if (!u || current?.lockKey !== u.key) return;
+  runOp('restore', path => invoke('restore_ref', { path, token: u.d.token }), {
+    // Refused before anything was written (the name is taken, a trust question
+    // cancelled, 'busy'): the backend still holds the token, so offer it again.
+    // A git run that failed or timed out used it up.
+    done: (r, info) => {
+      if (!r.ok && r.exitCode === null && !r.timedOut && current?.lockKey === info.lockKey) showUndo(u.d, u.key);
+      return false;
+    },
+  });
+});
 
 /* ---------- desktop: real repositories ---------- */
 let current: RepoInfo | null = null;
@@ -2319,6 +2378,7 @@ function dropRepo({ empty = true }: { empty?: boolean } = {}){
   loadSeq++; openSeq++; jumpSeq++; streamGen = -1;
   stopHistory();
   hideError();   // a banner of the repo left behind; a failure of the next one shows after this
+  hideUndo();    // its Undo too: the token belongs to that repo
   busy = false; busyPath = null; document.body.classList.remove('loading');
   current = null; fingerprintSeen = null;
   if (prs.path) { prCache.set(prs.path, prs); prs = noPrs(); }
@@ -2581,15 +2641,17 @@ async function poll(){
   } catch (e) { /* repo moved or deleted; the next manual action will report it */ }
 }
 
-/* ---------- git operations: fetch, switch, create branch / tag ---------- */
+/* ---------- git operations: fetch, switch, create / rename / delete, Undo ---------- */
 /* One operation at a time per repository, keyed by the backend's lock key
    (linked worktrees of one repo share it, so their tabs wait together), and
    at most MAX_OPS app-wide. While the active tab's repo has one, every action
    there is off (opOff); other tabs stay free. */
 const BUSY = 'busy';           // backend error while an operation runs in the repo
 const BUSY_MSG = 'Another Git operation is already running in this repository.';
-type OpKind = 'fetch' | 'switch' | 'branch' | 'tag';   // branch / tag: create one
-const OP_BUSY: Record<OpKind, string> = { fetch: 'Fetching all remotes…', switch: 'Switching branch…', branch: 'Creating branch…', tag: 'Creating tag…' };
+// branch / tag: create one; delBranch / delTag: delete one; restore: Undo a delete.
+type OpKind = 'fetch' | 'switch' | 'branch' | 'tag' | 'rename' | 'delBranch' | 'delTag' | 'restore';
+const OP_BUSY: Record<OpKind, string> = { fetch: 'Fetching all remotes…', switch: 'Switching branch…', branch: 'Creating branch…', tag: 'Creating tag…',
+  rename: 'Renaming branch…', delBranch: 'Deleting branch…', delTag: 'Deleting tag…', restore: 'Restoring…' };
 interface RepoOp { kind: OpKind; pending: { info: RepoInfo; keep: boolean; manual: boolean } | null }   // pending: the load asked for meanwhile
 const ops = new Map<string, RepoOp>();       // by RepoInfo.lockKey
 const opErr = new Map<string, string>();     // by lockKey: banner text of the last failed operation, cleared by the next success
@@ -2626,6 +2688,8 @@ function updateFetchBtn(){
   $('#openBtn').title = off || 'Open repository (Ctrl/⌘ O)';
   $<HTMLButtonElement>('#showAllBtn').disabled = !!off;
   document.body.classList.toggle('op-running', !!off);
+  // Undo is an operation too: off at the cap (an operation here hides the bar).
+  undoBtn.disabled = !!cap; undoBtn.title = cap;
 }
 
 /* "↑2 ↓5" next to the branch name: the checked-out branch against its
@@ -2662,9 +2726,16 @@ async function loadRemotes(){
    the banner and opens the drawer, then the graph syncs once (or runs the load
    asked for meanwhile). In the background it is only logged and a failure
    marks its tabs; activating one loads it in full anyway. `switching`: it may
-   check out another branch (a switch, or a new branch with checkout). */
-async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>, switching = kind === 'switch'){
-  if (!NATIVE || !current || opHere() || capOff()) return;
+   check out another branch (a switch, or a new branch with checkout).
+   `done` runs once the result is logged, in the active tab or not (rename and
+   delete update the hide/solo lists there and show the Undo bar); it returns
+   true when those lists changed, and the active repo then reloads in full
+   instead of syncing. Resolves to the result, or null when nothing ran. */
+interface OpOpts { switching?: boolean; done?: (r: GitResult, info: RepoInfo) => boolean }
+async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>,
+                     { switching = kind === 'switch', done }: OpOpts = {}): Promise<GitResult | null>{
+  if (!NATIVE || !current || opHere() || capOff()) return null;
+  hideUndo();   // its token may be the one this operation changes (Undo itself included)
   const info = current, key = info.lockKey, at = new Date();
   const op: RepoOp = { kind, pending: null };
   ops.set(key, op); updateFetchBtn(); renderTabs();
@@ -2680,12 +2751,13 @@ async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>, s
     ops.delete(key);   // before the sync or load below: both stop while opHere()
   }
   logOp(at, info.name, r);
+  const listsChanged = done ? done(r, info) : false;
   const failed = !r.ok && !r.cancelled;
   if (current?.lockKey !== key) {
     if (failed) tabs.list.forEach(t => { if (t.info?.lockKey === key) t.err = true; });
     else if (r.ok) opErr.delete(key);
     updateFetchBtn(); renderTabs();
-    return;
+    return r;
   }
   if (failed) { showError(r.summary); opErr.set(key, r.summary); openOut(true); }
   else if (r.ok) {
@@ -2696,7 +2768,9 @@ async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>, s
   updateFetchBtn(); renderTabs();
   if (switching && S.commits.length) updateView();   // branch name and ↑↓ until the sync below
   const p = op.pending, waited = !tabBusy.hidden;
-  if (!p) await syncRepo();
+  // The walk itself changed (a hidden or soloed branch renamed or deleted): reload, as hiding does.
+  if (!p && listsChanged) { hiddenGen++; renderSide(); await loadRepo(current, { keep: true }); }
+  else if (!p) await syncRepo();
   else {
     await loadRepo(p.info, { keep: p.keep, manual: p.manual });
     // The tab showed the placeholder: bring back its selection, as a tab switch does.
@@ -2707,6 +2781,7 @@ async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>, s
   // stays on screen while its repo is active. A failed load's own error wins
   // (the banner is showing then).
   if (failed && current?.lockKey === key && $('#banner').hidden) showError(r.summary);
+  return r;
 }
 function runFetch(){
   if (S.remotes && S.remotes.size) runOp('fetch', path => invoke('fetch', { path }));
@@ -2724,8 +2799,10 @@ function runSwitch(ref: string){
    again with git. It keeps the commit's hash and the repo's lock key, not a
    row: a sync can move rows while it is open, and the ref must go to the repo
    it was asked for in. */
-const createDlg = $<HTMLDialogElement>('#createDlg'), cName = $<HTMLInputElement>('#cName'), cGo = $<HTMLButtonElement>('#cGo');
-let createFor: { kind: RefKind; hash: string; key: string } | null = null;
+const createDlg = $<HTMLDialogElement>('#createDlg'), cName = $<HTMLInputElement>('#cName'), cGo = $<HTMLButtonElement>('#cGo'), cAt = $('#createDlg .c-at');
+// rename: the same dialog renames local branch `from` (no commit, message or switch rows).
+type CreateFor = { mode: 'create'; kind: RefKind; hash: string; key: string } | { mode: 'rename'; kind: 'branch'; from: string; key: string };
+let createFor: CreateFor | null = null;
 const createOff = () => opNow() || capOff();
 function createEntries(c: Commit): CtxEntry[] {
   if (!NATIVE || c.stashRow) return [];
@@ -2735,6 +2812,45 @@ function createEntries(c: Commit): CtxEntry[] {
     { label: 'Create tag here…', off, run: () => openCreate('tag', c) },
   ];
 }
+
+/* ---------- rename / delete a branch, delete a tag ---------- */
+/* Local refs only. Rename uses the create dialog; a delete invokes at once,
+   because the backend asks every question itself (a native dialog page
+   script cannot answer) and counts the commits that would be left on no
+   branch. A delete shows the Undo bar. */
+const HEAD_DEL = 'The checked-out branch cannot be deleted';
+/* Rename and Delete for the local branch `name` (short). */
+function branchEntries(name: string, head: boolean): CtxEntry[] {
+  if (!NATIVE) return [];
+  const off = createOff();
+  return [
+    { label: 'Rename branch…', off, run: () => openRename(name) },
+    { label: 'Delete branch…', off: head ? HEAD_DEL : off, run: () => runDelete('branch', name) },
+  ];
+}
+/* A tag label's menu; c: its commit. Desktop only (pillTag). */
+function tagEntries(name: string, c: Commit | undefined): CtxEntry[] {
+  return [
+    { label: 'Delete tag…', off: createOff(), run: () => runDelete('tag', name) },
+    { label: 'Copy tag name', run: () => copyText(name) },
+    ...(c ? createEntries(c) : []),
+  ];
+}
+/* Every open path of info's repo (linked worktrees share its lock key):
+   their hide/solo lists follow a renamed or deleted branch. */
+function repoPaths(info: RepoInfo){
+  return [info.path, ...tabs.list.flatMap(t => t.info && t.info.lockKey === info.lockKey ? [t.info.path] : [])];
+}
+function runDelete(kind: RefKind, name: string){
+  const done = (r: GitResult, info: RepoInfo) => {
+    // deleted: the local ref is gone (also when deleting the tag on origin failed afterwards).
+    if (!r.deleted) return false;
+    if (current?.lockKey === info.lockKey) showUndo(r.deleted, info.lockKey);
+    return kind === 'branch' && followRef(repoPaths(info), name, null);
+  };
+  if (kind === 'branch') runOp('delBranch', path => invoke('delete_branch', { path, name }), { done });
+  else runOp('delTag', path => invoke('delete_tag', { path, name }), { done });
+}
 /* Short names of the refs of that kind, from the snapshot the labels use. */
 function refNames(kind: RefKind){
   const pre = kind === 'branch' ? 'refs/heads/' : 'refs/tags/';
@@ -2742,20 +2858,23 @@ function refNames(kind: RefKind){
 }
 function checkCreate(){
   if (!createFor) return;
-  const name = cName.value, why = nameProblem(name, createFor.kind) || nameClash(name, createFor.kind, refNames(createFor.kind));
+  // Renaming: the branch's own name is no clash, but Rename stays off until the name changes.
+  const self = createFor.mode === 'rename' ? createFor.from : undefined;
+  const name = cName.value, why = nameProblem(name, createFor.kind) || nameClash(name, createFor.kind, refNames(createFor.kind), self);
   $('#cErr').textContent = why;
   cName.setAttribute('aria-invalid', String(!!why));
-  cGo.disabled = !name || !!why;
+  cGo.disabled = !name || !!why || name === self;
 }
 function openCreate(kind: RefKind, c: Commit){
   if (!current || createOff() || createDlg.open) return;
-  createFor = { kind, hash: c.hash, key: current.lockKey };
+  createFor = { mode: 'create', kind, hash: c.hash, key: current.lockKey };
   const branch = kind === 'branch';
   $('#cTitle').textContent = branch ? 'Create branch' : 'Create tag';
   cGo.textContent = branch ? 'Create branch' : 'Create tag';
   $('#cLabel').textContent = branch ? 'Branch name' : 'Tag name';
   $('#cHash').textContent = c.hash.slice(0, 7);
   $('#cSubject').textContent = c.subject;
+  cAt.hidden = false;
   $('#cSwitchRow').hidden = !branch;
   $('#cMsgRow').hidden = branch;
   cName.value = '';
@@ -2764,6 +2883,19 @@ function openCreate(kind: RefKind, c: Commit){
   checkCreate();
   createDlg.showModal();
   cName.focus();
+}
+/* The create dialog, renaming local branch `from`: the old name filled in and selected. */
+function openRename(from: string){
+  if (!current || createOff() || createDlg.open) return;
+  createFor = { mode: 'rename', kind: 'branch', from, key: current.lockKey };
+  $('#cTitle').textContent = 'Rename branch';
+  cGo.textContent = 'Rename';
+  $('#cLabel').textContent = 'New name';
+  cAt.hidden = true; $('#cSwitchRow').hidden = true; $('#cMsgRow').hidden = true;
+  cName.value = from;
+  checkCreate();
+  createDlg.showModal();
+  cName.focus(); cName.select();
 }
 function closeCreate(){ createFor = null; if (createDlg.open) createDlg.close(); }
 // 'close' comes later, as a task: by then the dialog may be open again for another commit.
@@ -2780,11 +2912,15 @@ $('#createForm').addEventListener('submit', e => {
   if (!f || cGo.disabled) return;
   closeCreate();
   if (current?.lockKey !== f.key) return;   // its repo is no longer the active one
-  if (f.kind === 'branch') runOp('branch', path => invoke('create_branch', { path, name, at: f.hash, checkout }), checkout);
+  if (f.mode === 'rename') {
+    const from = f.from;
+    runOp('rename', path => invoke('rename_branch', { path, from, to: name }), { done: (r, info) => r.ok && followRef(repoPaths(info), from, name) });
+  }
+  else if (f.kind === 'branch') runOp('branch', path => invoke('create_branch', { path, name, at: f.hash, checkout }), { switching: checkout });
   else runOp('tag', path => invoke('create_tag', { path, name, at: f.hash, message: msg || null }));
 });
 
-/* Output drawer: every operation (fetch, switch, create), newest last, in memory only. Text from git
+/* Output drawer: every operation (fetch, switch, create, rename, delete, Undo), newest last, in memory only. Text from git
    only ever goes through textContent. */
 interface OutEntry { at: Date; repo: string; r: GitResult }
 const OUT_MAX = 50;
