@@ -1,7 +1,7 @@
 // Rename a branch, delete a branch or tag, and Undo a delete. The menus:
-// a local branch (panel leaf or graph label) gets "Rename branch…" and
-// "Delete branch…" (Delete off on the checked-out branch); a tag label gets
-// "Delete tag…" and "Copy tag name"; remote branches get nothing new. Rename
+// a local branch (panel leaf or graph label) gets "Rename branch" and
+// "Delete branch" (Delete off on the checked-out branch); a tag label gets
+// "Delete tag" and "Copy tag name"; remote branches get nothing new. Rename
 // reuses the create dialog. Each runs as one operation (toolbar text, other
 // actions off, Output). The backend asks every confirmation itself, so the
 // page invokes at once. A delete shows the Undo bar (its token goes back to
@@ -85,33 +85,33 @@ run(async () => {
 
   // ---- menus ----
   ctx(leaf('refs/heads/feat')); await wait(30);
-  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch…,Delete branch…', 'panel: local branch', labels());
+  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch,Delete branch', 'panel: local branch', labels());
   await esc();
   ctx(leaf('refs/heads/main')); await wait(30);
-  ok(labels() === 'Switch to main(off),Hide(off),Copy branch name,Rename branch…,Delete branch…(off)', 'panel: checked-out branch', labels());
-  ok(reason('Delete branch…') === 'The checked-out branch cannot be deleted', 'says why Delete is off', reason('Delete branch…'));
+  ok(labels() === 'Switch to main(off),Hide(off),Copy branch name,Rename branch,Delete branch(off)', 'panel: checked-out branch', labels());
+  ok(reason('Delete branch') === 'The checked-out branch cannot be deleted', 'says why Delete is off', reason('Delete branch'));
   await esc();
   ctx(leaf('refs/remotes/origin/only')); await wait(30);
   ok(labels() === 'Switch to origin/only,Hide,Copy branch name', 'panel: remote branch gets nothing new', labels());
   await esc();
   ctx(pill('feat')); await wait(30);
-  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch…,Delete branch…,Create branch here…,Create tag here…', 'graph: local branch label', labels());
+  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch,Delete branch,Create branch,Create tag', 'graph: local branch label', labels());
   await esc();
   ctx(pill('main')); await wait(30);
-  ok(labels().includes('Delete branch…(off)') && reason('Delete branch…') === 'The checked-out branch cannot be deleted', 'graph: checked-out label', labels());
+  ok(labels().includes('Delete branch(off)') && reason('Delete branch') === 'The checked-out branch cannot be deleted', 'graph: checked-out label', labels());
   await esc();
   ctx(pill('only')); await wait(30);
-  ok(labels() === 'Switch to origin/only,Hide,Copy branch name,Create branch here…,Create tag here…', 'graph: remote-only label', labels());
+  ok(labels() === 'Switch to origin/only,Hide,Copy branch name,Create branch,Create tag', 'graph: remote-only label', labels());
   await esc();
   ctx(pill('v1')); await wait(30);
-  ok(labels() === 'Delete tag…,Copy tag name,Create branch here…,Create tag here…', 'graph: tag label', labels());
-  pick('Create tag here…'); await wait(30);
+  ok(labels() === 'Delete tag,Copy tag name,Create branch,Create tag', 'graph: tag label', labels());
+  pick('Create tag'); await wait(30);
   ok(dlg.open && $('#cHash').textContent === 'ddddddd', 'tag label: Create acts on its commit', $('#cHash').textContent);
   await esc();
 
   // ---- rename dialog ----
   ctx(pill('feat')); await wait(30);
-  pick('Rename branch…'); await wait(30);
+  pick('Rename branch'); await wait(30);
   ok(dlg.open && $('#cTitle').textContent === 'Rename branch' && go.textContent === 'Rename', 'rename dialog', $('#cTitle').textContent + '/' + go.textContent);
   ok(name.value === 'feat' && name.selectionStart === 0 && name.selectionEnd === 4 && document.activeElement === name, 'old name filled in and selected');
   ok(dlg.querySelector('.c-at').hidden && $('#cMsgRow').hidden && $('#cSwitchRow').hidden, 'no commit, message or switch rows');
@@ -131,7 +131,7 @@ run(async () => {
   ok(!dlg.open && last('rename_branch') === JSON.stringify({ path: DEMO, from: 'feat', to: 'feat/x' }), 'rename_branch called', last('rename_branch'));
   ok($('#fetchBtn').title === 'Renaming branch…', 'toolbar: Renaming branch…', $('#fetchBtn').title);
   ctx(leaf('refs/heads/old')); await wait(30);
-  ok(reason('Rename branch…') === 'Renaming branch…' && reason('Delete branch…') === 'Renaming branch…', 'menu off meanwhile, says why', labels());
+  ok(reason('Rename branch') === 'Renaming branch…' && reason('Delete branch') === 'Renaming branch…', 'menu off meanwhile, says why', labels());
   await esc();
   await finish(res('Renamed branch feat to feat/x.'));
   ok(count('sync_history') === syncs + 1 && count('start_history') === loads, 'lists unchanged: one sync, no reload');
@@ -139,7 +139,7 @@ run(async () => {
 
   // The create dialog is itself again afterwards.
   ctx(msg('root')); await wait(30);
-  pick('Create branch here…'); await wait(30);
+  pick('Create branch'); await wait(30);
   ok(dlg.open && $('#cTitle').textContent === 'Create branch' && go.textContent === 'Create branch' && name.value === '', 'create dialog after a rename');
   ok(!dlg.querySelector('.c-at').hidden && !$('#cSwitchRow').hidden && $('#cMsgRow').hidden, 'create rows back');
   type('feat');
@@ -148,7 +148,7 @@ run(async () => {
 
   // ---- delete branch, Undo ----
   ctx(leaf('refs/heads/feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   ok(!dlg.open && last('delete_branch') === JSON.stringify({ path: DEMO, name: 'feat' }), 'delete_branch called at once (the backend asks)', last('delete_branch'));
   ok($('#fetchBtn').title === 'Deleting branch…', 'toolbar: Deleting branch…', $('#fetchBtn').title);
   const s2 = count('sync_history');
@@ -171,7 +171,7 @@ run(async () => {
   // backend keeps the token and says "not run" (exitCode null), so the bar is back.
   const delAndUndo = async token => {
     ctx(pill('feat')); await wait(30);
-    pick('Delete branch…'); await wait(30);
+    pick('Delete branch'); await wait(30);
     await finish(res('Deleted.', { deleted: del(token, 'feat') }));
     $('#undoBtn').click(); await wait(30);
   };
@@ -191,7 +191,7 @@ run(async () => {
 
   // A tag, its push to origin failed: the banner and the bar both show.
   ctx(pill('v1')); await wait(30);
-  pick('Delete tag…'); await wait(30);
+  pick('Delete tag'); await wait(30);
   ok(last('delete_tag') === JSON.stringify({ path: DEMO, name: 'v1' }), 'delete_tag called', last('delete_tag'));
   ok($('#fetchBtn').title === 'Deleting tag…', 'toolbar: Deleting tag…', $('#fetchBtn').title);
   await finish(res('Deleted tag v1 (ddddddd) here; deleting it on origin failed: x', { ok: false, exitCode: 1, deleted: del(8, 'v1', 'tag', 'ddddddd') }));
@@ -202,13 +202,13 @@ run(async () => {
 
   // Deleted on origin too.
   ctx(pill('v1')); await wait(30);
-  pick('Delete tag…'); await wait(30);
+  pick('Delete tag'); await wait(30);
   await finish(res('Deleted tag v1 (ddddddd) here and on origin.', { deleted: del(9, 'v1', 'tag', 'ddddddd', true) }));
   ok(barMsg() === 'Deleted tag v1 (ddddddd) here and on origin. Undo restores it here only.', 'on origin: says Undo is local only', barMsg());
 
   // A new delete replaces the bar (hidden while it runs).
   ctx(pill('feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   ok(bar.hidden, 'the next operation hides the bar');
   await finish(res('Deleted.', { deleted: del(10, 'feat') }));
   ok(!bar.hidden && barMsg() === 'Deleted branch feat (ccccccc)', 'new bar', barMsg());
@@ -220,13 +220,13 @@ run(async () => {
 
   // Cancelled in the native dialog: nothing deleted, no bar.
   ctx(pill('feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   await finish(res('Cancelled; nothing deleted.', { ok: false, cancelled: true, exitCode: null }));
   ok(bar.hidden && $('#banner').hidden, 'cancelled: no bar, no banner');
 
   // The newest token is the one Undo sends.
   ctx(pill('feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   await finish(res('Deleted.', { deleted: del(11, 'feat') }));
   $('#undoBtn').click(); await wait(30);
   ok(last('restore_ref') === JSON.stringify({ path: DEMO, token: 11 }), 'Undo sends the newest token', last('restore_ref'));
@@ -234,7 +234,7 @@ run(async () => {
 
   // A tab switch hides it.
   ctx(pill('feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   await finish(res('Deleted.', { deleted: del(12, 'feat') }));
   ok(!bar.hidden, 'bar before the tab switch');
   tabs()[2].click(); await wait(300);
@@ -247,7 +247,7 @@ run(async () => {
   localStorage.setItem('lanes.solo', JSON.stringify({ [WT]: ['refs/heads/old', 'refs/heads/feat'] }));
   $('#refreshBtn').click(); await wait(300);
   ctx(leaf('refs/heads/old')); await wait(30);
-  pick('Rename branch…'); await wait(30);
+  pick('Rename branch'); await wait(30);
   ok(name.value === 'old', 'rename a hidden branch from the panel', name.value);
   type('new'); go.click(); await wait(30);
   ok(last('rename_branch') === JSON.stringify({ path: DEMO, from: 'old', to: 'new' }), 'rename_branch old -> new', last('rename_branch'));
@@ -262,7 +262,7 @@ run(async () => {
 
   // A delete drops the entry.
   ctx(pill('feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   await finish(res('Deleted.', { deleted: del(13, 'feat') }));
   ok(same(lists('lanes.solo')[WT], ['refs/heads/new']), 'deleted branch leaves the solo list', JSON.stringify(lists('lanes.solo')[WT]));
   $('#undoClose').click();
@@ -270,7 +270,7 @@ run(async () => {
   // ---- background tab ----
   localStorage.setItem('lanes.hidden', JSON.stringify({ [DEMO]: ['refs/heads/feat', 'refs/heads/team/'] }));
   ctx(leaf('refs/heads/feat')); await wait(30);
-  pick('Delete branch…'); await wait(30);
+  pick('Delete branch'); await wait(30);
   tabs()[2].click(); await wait(300);
   ok($('#repoName').textContent === 'other', 'other tab active', $('#repoName').textContent);
   const l4 = count('start_history', DEMO), y4 = count('sync_history', DEMO);
@@ -288,7 +288,7 @@ run(async () => {
   f.refs.headRef = 'refs/heads/FEAT'; f.refs.headSha = 'c'.repeat(40);
   $('#refreshBtn').click(); await wait(300);
   ctx(leaf('refs/heads/feat')); await wait(30);
-  ok(reason('Delete branch…') === 'The checked-out branch cannot be deleted', 'panel: HEAD in another case, Delete off', labels());
+  ok(reason('Delete branch') === 'The checked-out branch cannot be deleted', 'panel: HEAD in another case, Delete off', labels());
   await esc();
   // The graph has no label "FEAT", so it shows HEAD first: feat is in the "+N" box.
   const cRef = msg('feat work').closest('.row').querySelector('.col-ref');
@@ -296,6 +296,6 @@ run(async () => {
   const popFeat = $$('#body .ref-pop:not([hidden]) .pill').find(p => p.querySelector('.name').textContent === 'feat');
   ok(!!popFeat, 'feat is in the label box');
   if (popFeat) ctx(popFeat); await wait(30);
-  ok(reason('Delete branch…') === 'The checked-out branch cannot be deleted', 'graph: HEAD in another case, Delete off', labels());
+  ok(reason('Delete branch') === 'The checked-out branch cannot be deleted', 'graph: HEAD in another case, Delete off', labels());
   await esc();
 });`;

@@ -761,7 +761,7 @@ function render(keepHash: string | null, keepScroll: { top: number; left: number
   updateView();
   renderSide();
 
-  sel = -1; runSearch();
+  sel = -1; runSearch(); updateBranchBtn();
   // A stash or pull request card stays put across syncs of the same repo.
   const show = !(keepHash && detailFor && detailFor.card);
   if (n && wipSel && wipOn()) {
@@ -792,7 +792,7 @@ function select(i: number, { scroll = false, open = false, detail: show = true }
     const c = S.commits[i]!, st = c.stashRow && stashes.find(x => x.key === c.stashKey);
     if (st) stashCard(st); else renderDetail(c);
   }
-  markSide();
+  markSide(); updateBranchBtn();
   if (scroll) ensureVisible(i);
   if (open) detail.classList.add('open');
   scheduleDraw();
@@ -1666,7 +1666,7 @@ function selectWip({ open = false }: { open?: boolean } = {}){
   sel = -1; wipSel = true;
   wipRow.classList.add('sel');
   wipCard();
-  markSide();
+  markSide(); updateBranchBtn();
   if (open) detail.classList.add('open');
   scheduleDraw();
 }
@@ -2670,8 +2670,9 @@ const opOff = () => opHere() ? OP_OFF : '';
 const capOff = () => ops.size >= MAX_OPS && !opHere() ? CAP_OFF : '';
 const tabRunning = (t: Tab) => !!t.info && ops.has(t.info.lockKey);
 
+const NO_REPO = 'No repository open';
 /* The toolbar and panel controls of the active tab: Fetch (its operation, the
-   cap), and Refresh, Open, Show all and the eye/solo buttons (body.op-running),
+   cap), and Refresh, Show all and the eye/solo buttons (body.op-running),
    which are off while its repo has an operation. */
 function updateFetchBtn(){
   if (!NATIVE) return;
@@ -2681,16 +2682,14 @@ function updateFetchBtn(){
   b.setAttribute('aria-disabled', String(!current || none || !!op || !!cap));
   b.setAttribute('aria-busy', String(here));
   b.classList.toggle('running', here);
-  $('#fetchLabel').textContent = here ? 'Fetching…' : 'Fetch';
   b.setAttribute('aria-label', here ? 'Fetching' : 'Fetch');
   // The operation first: a repo waiting for it shows no remotes yet.
-  b.title = op ? OP_BUSY[op.kind] : none ? 'No remotes'
+  b.title = op ? OP_BUSY[op.kind] : !current ? NO_REPO : none ? 'No remotes'
     : cap || 'Fetch all remotes (Ctrl/⌘ Shift F)';
+  updateBranchBtn();
   const off = opOff();
   $('#refreshBtn').setAttribute('aria-disabled', String(!!off));
   $('#refreshBtn').title = off || 'Refresh (Ctrl/⌘ R)';
-  $('#openBtn').setAttribute('aria-disabled', String(!!off));
-  $('#openBtn').title = off || 'Open repository (Ctrl/⌘ O)';
   $<HTMLButtonElement>('#showAllBtn').disabled = !!off;
   document.body.classList.toggle('op-running', !!off);
   // Undo is an operation too: off at the cap (an operation here hides the bar).
@@ -2798,8 +2797,8 @@ function runSwitch(ref: string){
 }
 
 /* ---------- create a branch or tag at a commit ---------- */
-/* Right-click a commit row, or a label on it: "Create branch here…" /
-   "Create tag here…" (desktop only; not on the WIP row or a stash). The
+/* Right-click a commit row, or a label on it: "Create branch" /
+   "Create tag" (desktop only; not on the WIP row or a stash). The
    dialog checks the name as it is typed (refname.ts) and the backend checks
    again with git. It keeps the commit's hash and the repo's lock key, not a
    row: a sync can move rows while it is open, and the ref must go to the repo
@@ -2813,9 +2812,29 @@ function createEntries(c: Commit): CtxEntry[] {
   if (!NATIVE || c.stashRow) return [];
   const off = createOff();
   return [
-    { label: 'Create branch here…', off, run: () => openCreate('branch', c) },
-    { label: 'Create tag here…', off, run: () => openCreate('tag', c) },
+    { label: 'Create branch', off, run: () => openCreate('branch', c) },
+    { label: 'Create tag', off, run: () => openCreate('tag', c) },
   ];
+}
+
+/* The toolbar's Create branch: at the selected commit (not a stash row), else
+   at HEAD when it is loaded. The dialog names the commit either way. */
+function branchTarget(): Commit | undefined {
+  // A stash or PR card: the graph row under it is only where it points (a
+  // stash's base when its own row is not loaded), not a pick.
+  const c = sel >= 0 && !(detailFor && detailFor.card) ? S.commits[sel] : undefined;
+  if (c && !c.stashRow) return c;
+  const h = current && S.refs && S.refs.headSha ? S.idx.get(S.refs.headSha) : undefined;
+  return h === undefined ? undefined : S.commits[h];
+}
+/* Run on select, on render and with the other toolbar state; hovering or
+   focusing the button runs it again, since a sync that changes no label
+   (HEAD moved under solo) renders nothing. A click reads the target afresh. */
+function updateBranchBtn(){
+  if (!NATIVE) return;
+  const off = !current ? NO_REPO : createOff() || (branchTarget() ? '' : 'No commit to branch from');
+  $('#branchBtn').setAttribute('aria-disabled', String(!!off));
+  $('#branchBtn').title = off || 'Create branch at the selected commit, or HEAD';
 }
 
 /* ---------- rename / delete a branch, delete a tag ---------- */
@@ -2831,14 +2850,14 @@ function branchEntries(name: string): CtxEntry[] {
   if (!NATIVE) return [];
   const off = createOff(), head = sameRef('refs/heads/' + name, S.refs ? S.refs.headRef : null);
   return [
-    { label: 'Rename branch…', off, run: () => openRename(name) },
-    { label: 'Delete branch…', off: head ? HEAD_DEL : off, run: () => runDelete('branch', name) },
+    { label: 'Rename branch', off, run: () => openRename(name) },
+    { label: 'Delete branch', off: head ? HEAD_DEL : off, run: () => runDelete('branch', name) },
   ];
 }
 /* A tag label's menu; c: its commit. Desktop only (pillTag). */
 function tagEntries(name: string, c: Commit | undefined): CtxEntry[] {
   return [
-    { label: 'Delete tag…', off: createOff(), run: () => runDelete('tag', name) },
+    { label: 'Delete tag', off: createOff(), run: () => runDelete('tag', name) },
     { label: 'Copy tag name', run: () => copyText(name) },
     ...(c ? createEntries(c) : []),
   ];
@@ -3120,10 +3139,12 @@ new ResizeObserver(scheduleDraw).observe(wrap);
 // tests/ui reads state through this; real builds have __TEST__ = false and drop it.
 if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn, nameProblem, nameClash };
 if (NATIVE) {
-  $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;
   $('#fetchBtn').hidden = false;
-  $('#openBtn').addEventListener('click', pickRepo);
+  $('#branchBtn').hidden = false;
+  $('#branchBtn').addEventListener('click', () => { const c = branchTarget(); if (c) openCreate('branch', c); });
+  $('#branchBtn').addEventListener('pointerenter', updateBranchBtn);
+  $('#branchBtn').addEventListener('focus', updateBranchBtn);
   // aria-disabled instead of disabled, so the "No remotes" tooltip still shows.
   $('#fetchBtn').addEventListener('click', () => { if ($('#fetchBtn').getAttribute('aria-disabled') !== 'true') runFetch(); });
   $('#emptyOpen').addEventListener('click', pickRepo);

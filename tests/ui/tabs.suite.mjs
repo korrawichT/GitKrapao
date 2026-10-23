@@ -183,6 +183,8 @@ run(async () => {
   key('t', { ctrlKey: true }); await wait(100);
   ok(genB > 0 && f.stops.slice(st0).includes(genB), 'new tab stops the history stream of b', genB + ' ' + JSON.stringify(f.stops));
   ok(tabs().length === 3 && names()[2] === 'New tab' && active() === 2 && empty() && $$('#emptyRecent .recent-item').length === 3, 'new tab', state() + ' | empty=' + empty());
+  ok(['#fetchBtn', '#branchBtn'].every(s => $(s).getAttribute('aria-disabled') === 'true' && $(s).title === 'No repository open'),
+    'new tab: Fetch and Create branch off, saying why', $('#fetchBtn').title + ' | ' + $('#branchBtn').title);
   await click($('#emptyRecent .recent-item[data-path="' + A + '"]'), 300);
   ok(tabs().length === 2 && names().join() === 'a,b' && active() === 0 && rows().includes('a-three') && !empty(), 'new tab: picking an open repo activates its tab', state());
 
@@ -248,6 +250,9 @@ run(async () => {
   await click($('#tabMore'), 50);
   const items = $$('#tabList .menu-item');
   ok(!$('#tabList').hidden && items.length === 2 && items[1].textContent.includes('b') && items[1].textContent.includes(B), 'tab list shows name and path', $('#tabList').textContent);
+  const lr = $('#tabList').getBoundingClientRect(), mr = $('#tabMore').getBoundingClientRect();
+  ok(lr.left >= 0 && lr.right <= document.documentElement.clientWidth && Math.abs(lr.right - mr.right) <= 1,
+    'tab list stays inside the window, right edge under the ▾ button', JSON.stringify([lr.left, lr.right, mr.right, document.documentElement.clientWidth]));
   await click(items[1], 300);
   ok($('#tabList').hidden && active() === 1 && rows().includes('b-two'), 'tab list activates the tab', state());
 

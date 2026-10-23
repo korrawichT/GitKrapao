@@ -1,5 +1,5 @@
 // Creating a branch or tag: right-click a commit row (or a label on it), then
-// "Create branch here…" / "Create tag here…" opens a dialog that checks the
+// "Create branch" / "Create tag" opens a dialog that checks the
 // name as it is typed. Create runs as one operation, like fetch and switch:
 // the toolbar shows it, the repo's other actions are off meanwhile, the
 // result goes to the Output drawer (a failure also to the banner) and the
@@ -58,6 +58,20 @@ run(async () => {
   await wait(300);
   ok(!dlg.open, 'no dialog at start');
 
+  // The toolbar button: at the selected commit, else at HEAD (WIP row or a
+  // stash selected counts as nothing).
+  const bb = $('#branchBtn');
+  ok(!bb.hidden && bb.getAttribute('aria-disabled') === 'false' && bb.title === 'Create branch at the selected commit, or HEAD', 'toolbar button on', bb.title);
+  $('#body .wip-row').click(); await wait(30);
+  bb.click(); await wait(30);
+  ok(dlg.open && $('#cTitle').textContent === 'Create branch' && $('#cHash').textContent === 'aaaaaaa', 'WIP selected: at HEAD', $('#cHash').textContent);
+  ok(!$('#cSwitchRow').hidden && $('#cMsgRow').hidden && document.activeElement === name, 'the same branch dialog');
+  key('Escape'); await wait(30);
+  msg('root').click(); await wait(30);
+  bb.click(); await wait(30);
+  ok(dlg.open && $('#cHash').textContent === 'bbbbbbb', 'a commit selected: at that commit', $('#cHash').textContent);
+  key('Escape'); await wait(30);
+
   // The WIP row is not a commit: nothing to create there.
   const wip = $('#body .wip-row');
   ok(!!wip, 'WIP row shown');
@@ -73,15 +87,15 @@ run(async () => {
   ok(!over.defaultPrevented && $('#ctxMenu').hidden, 'selected row text: the WebView menu, not Create');
   sel(msg('feat work'));
   ctx(msg('main work')); await wait(30);
-  ok(labels() === 'Create branch here…,Create tag here…', 'a selection elsewhere: Create menu', labels());
+  ok(labels() === 'Create branch,Create tag', 'a selection elsewhere: Create menu', labels());
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(20);
   getSelection().removeAllRanges();
 
   // Right-click a commit row: it is selected, and the menu offers both.
   ctx(msg('root')); await wait(30);
-  ok(labels() === 'Create branch here…,Create tag here…', 'commit row menu', labels());
+  ok(labels() === 'Create branch,Create tag', 'commit row menu', labels());
   ok(msg('root').parentElement.classList.contains('sel'), 'the commit is selected');
-  pick('Create branch here…'); await wait(30);
+  pick('Create branch'); await wait(30);
   ok(dlg.open && $('#cTitle').textContent === 'Create branch', 'branch dialog opens', $('#cTitle').textContent);
   ok($('#cHash').textContent === 'bbbbbbb', 'names the commit', $('#cHash').textContent);
   ok($('#cSubject').textContent.startsWith('root <img') && !dlg.querySelector('img') && !window.__pwned, 'subject shown as text');
@@ -113,8 +127,11 @@ run(async () => {
   ok(last('create_branch') === JSON.stringify({ path: 'C:/fake/demo', name: 'topic', at: B, checkout: true }), 'create_branch with the full hash', last('create_branch'));
   ok($('#headName').textContent === 'Switching…', 'switching: the toolbar says so', $('#headName').textContent);
   ok($('#fetchBtn').getAttribute('aria-disabled') === 'true' && $('#fetchBtn').title === 'Creating branch…', 'Fetch off meanwhile', $('#fetchBtn').title);
+  ok(bb.getAttribute('aria-disabled') === 'true' && bb.title === 'Creating branch…', 'toolbar Create branch off meanwhile', bb.title);
+  bb.click(); await wait(30);
+  ok(!dlg.open, 'and clicking it opens nothing');
   ctx(msg('main work')); await wait(30);
-  ok(labels() === 'Create branch here…(off),Create tag here…(off)', 'menu off while it runs', labels());
+  ok(labels() === 'Create branch(off),Create tag(off)', 'menu off while it runs', labels());
   const why = items().map(b => b.querySelector('.p')?.textContent).join(',');
   ok(why === 'Creating branch…,Creating branch…', 'says what is running', why);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(20);
@@ -131,7 +148,7 @@ run(async () => {
 
   // Without switching.
   ctx(msg('main work')); await wait(30);
-  pick('Create branch here…'); await wait(30);
+  pick('Create branch'); await wait(30);
   type('topic2'); $('#cSwitch').click();
   go.click(); await wait(30);
   ok(last('create_branch') === JSON.stringify({ path: 'C:/fake/demo', name: 'topic2', at: 'a'.repeat(40), checkout: false }), 'checkout false', last('create_branch'));
@@ -141,8 +158,8 @@ run(async () => {
   // A tag from a graph label's menu: "Switch to" stays first, Create comes last.
   const pill = [...document.querySelectorAll('#body .pill')].find(p => p.textContent.includes('feat'));
   ctx(pill); await wait(30);
-  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch…,Delete branch…,Create branch here…,Create tag here…', 'label menu', labels());
-  pick('Create tag here…'); await wait(30);
+  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch,Delete branch,Create branch,Create tag', 'label menu', labels());
+  pick('Create tag'); await wait(30);
   ok(dlg.open && $('#cTitle').textContent === 'Create tag' && $('#cHash').textContent === 'ccccccc', 'tag dialog for the label commit');
   ok($('#cSwitchRow').hidden && !$('#cMsgRow').hidden && $('#cMsg').value === '', 'message box, no switch box');
   type('V1');
@@ -154,7 +171,7 @@ run(async () => {
   f.create(done('Created tag v2 at ccccccc.')); await wait(200);
 
   ctx(msg('root')); await wait(30);
-  pick('Create tag here…'); await wait(30);
+  pick('Create tag'); await wait(30);
   type('v3'); $('#cMsg').value = '  Release 3 ';
   go.click(); await wait(30);
   ok(last('create_tag') === JSON.stringify({ path: 'C:/fake/demo', name: 'v3', at: B, message: 'Release 3' }), 'message: annotated', last('create_tag'));
@@ -165,11 +182,11 @@ run(async () => {
   // Escape and Cancel close without creating anything.
   const made = count('create_branch') + count('create_tag');
   ctx(msg('root')); await wait(30);
-  pick('Create branch here…'); await wait(30);
+  pick('Create branch'); await wait(30);
   type('never'); key('Escape'); await wait(30);
   ok(!dlg.open, 'Escape closes');
   ctx(msg('root')); await wait(30);
-  pick('Create branch here…'); await wait(30);
+  pick('Create branch'); await wait(30);
   ok(name.value === '' && go.disabled, 'opens empty again');
   type('never'); $('#cCancel').click(); await wait(30);
   ok(!dlg.open && count('create_branch') + count('create_tag') === made, 'Cancel closes; nothing created');
@@ -177,7 +194,7 @@ run(async () => {
   // A click on the backdrop closes it; one that only ends there (selecting
   // text in the box and letting go outside) does not.
   ctx(msg('root')); await wait(30);
-  pick('Create branch here…'); await wait(30);
+  pick('Create branch'); await wait(30);
   type('drag');
   name.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   dlg.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -190,7 +207,7 @@ run(async () => {
   // this headless run): one left over from an earlier close that arrives
   // while the dialog is open again must not wipe it.
   ctx(msg('root')); await wait(30);
-  pick('Create tag here…'); await wait(30);
+  pick('Create tag'); await wait(30);
   dlg.dispatchEvent(new Event('close'));
   type('V1');
   ok(dlg.open && err.textContent === 'A tag named v1 already exists.', 'a late close event leaves the open dialog alone', err.textContent);

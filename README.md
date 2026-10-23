@@ -25,13 +25,13 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
   - A remote branch with no local copy gets a local branch that tracks it.
   - A local branch that is only behind its remote is fast-forwarded. One with its own commits is left as it is.
   - Uncommitted changes are never lost. If switching would overwrite them, the app asks whether to stash them first, untracked files included.
-- **Create branch or tag:** right-click a commit (or a label on it) and choose **Create branch here…** or **Create tag here…**.
+- **Create branch or tag:** right-click a commit (or a label on it) and choose **Create branch** or **Create tag**. The branch button next to Fetch, in the middle of the toolbar, creates a branch at the selected commit, or at HEAD when none is selected.
   - The name is checked as you type: one that is taken (in any letter case), that git would refuse, or that Windows cannot store as a file cannot be used. An existing branch or tag is never overwritten.
   - A new branch is switched to right away unless you untick **Switch to the new branch**; the switch works as above.
   - A tag with a message is an annotated tag, one without is lightweight. Tags are not signed.
   - Nothing is pushed: push the new branch or tag from your editor or a terminal.
-- **Rename branch:** right-click a local branch in the left panel or a label in the graph and choose **Rename branch…**. The name is checked as you type, as for a new branch. Its upstream and history follow, and the checked-out branch can be renamed too. A new name that differs only in letter case is refused, because Windows stores both as one file. Branches you hid or soloed keep their setting under the new name in every tab of that repository you have opened in this session; a tab restored at startup but not opened yet, and a linked worktree that is not open as a tab, keep the old name.
-- **Delete branch or tag:** right-click a local branch (the checked-out one, here or in another worktree, cannot be deleted) or a tag label and choose **Delete branch…** or **Delete tag…**. Every delete asks in a native dialog that names the repository.
+- **Rename branch:** right-click a local branch in the left panel or a label in the graph and choose **Rename branch**. The name is checked as you type, as for a new branch. Its upstream and history follow, and the checked-out branch can be renamed too. A new name that differs only in letter case is refused, because Windows stores both as one file. Branches you hid or soloed keep their setting under the new name in every tab of that repository you have opened in this session; a tab restored at startup but not opened yet, and a linked worktree that is not open as a tab, keep the old name.
+- **Delete branch or tag:** right-click a local branch (the checked-out one, here or in another worktree, cannot be deleted) or a tag label and choose **Delete branch** or **Delete tag**. Every delete asks in a native dialog that names the repository.
   - **Unmerged warning:** before it asks, the app counts the commits that no other branch, remote-tracking branch, tag, stash or HEAD reaches. If there are any, the dialog says how many will no longer be on any branch.
   - After deleting a tag, if the repository has a remote called `origin`, the app asks whether to delete the tag there too and shows the URL. Nothing is pushed unless you say yes.
   - A branch or tag that has a twin differing only in letter case (`feat` and `FEAT`) is refused, because Windows stores both as one file and git would act on both. The same goes for renaming or deleting a branch that HEAD names in another letter case.
@@ -52,7 +52,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
 1. Install **Git for Windows** so the `git` command works. Running `git --version` in a terminal should print a version.
 2. Download `GitKrapao_x.y.z_x64-setup.exe` from the [latest release](https://github.com/korrawichT/GitKrapao/releases/latest), run it and click through to the end. It installs for the current user only, so it needs no admin rights; a newer installer updates the app in place and keeps your settings.
    - If Windows shows "Windows protected your PC", click **More info → Run anyway**. The installer is not code-signed yet.
-3. Start the app, click **Open repo** and pick any folder inside a repository.
+3. Start the app, click **Open repository** (or the repository name at the top left, then **Open another repository…**) and pick any folder inside a repository.
 
 To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) and run `az login` once. Everything else works without it.
 
