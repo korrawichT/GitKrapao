@@ -49,6 +49,8 @@ run(async () => {
   ok(!btn.hidden, 'fetch button shown in desktop mode');
   const r = btn.getBoundingClientRect(), mid = (r.left + r.right) / 2;
   ok(Math.abs(mid - innerWidth / 2) <= 1, 'fetch button in the middle of the toolbar', mid + ' vs ' + innerWidth / 2);
+  ok(btn.textContent.trim() === '' && btn.getAttribute('aria-label') === 'Fetch' && btn.title === (f.remotes.length ? 'Fetch all remotes (Ctrl/⌘ Shift F)' : 'No remotes'),
+    'icon only: name and tooltip', JSON.stringify([btn.textContent, btn.getAttribute('aria-label'), btn.title]));
   const theme = $('#themeBtn').getBoundingClientRect(), bar = $('.toolbar').getBoundingClientRect();
   ok(Math.abs(bar.right - 14 - theme.right) <= 1, 'the right group still ends at the right edge', theme.right + ' vs ' + bar.right);
   ok(!$('#openBtn'),'no Open repo button (the repo menu, Ctrl/⌘ O and the empty page open one)');
@@ -71,7 +73,7 @@ run(async () => {
   btn.click(); await wait(20);
   ok(count('fetch') === 1, 'click starts a fetch');
   ok(btn.classList.contains('running') && btn.getAttribute('aria-disabled') === 'true' && btn.getAttribute('aria-busy') === 'true', 'spinner and disabled while running');
-  ok($('#fetchLabel').textContent === 'Fetching…', 'label while running', $('#fetchLabel').textContent);
+  ok(btn.getAttribute('aria-label') === 'Fetching' && btn.title === 'Fetching all remotes…', 'icon only: name and tooltip while running', btn.getAttribute('aria-label') + ' | ' + btn.title);
   const fp = count('repo_fingerprint'), ws = count('work_status'), sync = count('sync_history');
   await wait(10000);
   ok(count('repo_fingerprint') === fp && count('work_status') === ws, 'no polling during the fetch', (count('repo_fingerprint') - fp) + ' polls');

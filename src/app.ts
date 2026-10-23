@@ -2681,7 +2681,6 @@ function updateFetchBtn(){
   b.setAttribute('aria-disabled', String(!current || none || !!op || !!cap));
   b.setAttribute('aria-busy', String(here));
   b.classList.toggle('running', here);
-  $('#fetchLabel').textContent = here ? 'Fetching…' : 'Fetch';
   b.setAttribute('aria-label', here ? 'Fetching' : 'Fetch');
   // The operation first: a repo waiting for it shows no remotes yet.
   b.title = op ? OP_BUSY[op.kind] : none ? 'No remotes'
