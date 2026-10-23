@@ -182,6 +182,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 - `pnpm run web:build` bundles the UI into `dist/` (`scripts/web.mjs`; `--test` exposes `window.__gitkrapao` for tests/ui, real builds drop it).
 - `pnpm run typecheck` (`tsc --noEmit`), `pnpm run test:ui`, `pnpm run check:bindings` (see TypeScript below), `cd src-tauri && cargo test --lib`.
 - Keep using pnpm; do not switch to bun (the bottleneck is Rust, not the package manager).
+- Everything written into the repo or GitHub is English: commit messages as Conventional Commits (`feat(toolbar): …`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`; see `.github/CONTRIBUTING.md`), PR titles and descriptions, plans and release notes. Commits before 2026-10-23 use Thai types (`เพิ่ม`, `แก้ไข`, …) and stay as they are.
 
 ## TypeScript
 - The UI is TypeScript (`src/app.ts`, `highlight.ts`, `ipc.ts`, `types.ts`). esbuild bundles it into one IIFE at `dist/app.js` and does not check types; `tsc` only checks (`noEmit`). Run `pnpm run typecheck` before calling a change done.
