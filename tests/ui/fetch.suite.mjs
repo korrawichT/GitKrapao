@@ -47,6 +47,11 @@ run(async () => {
     command: 'git fetch --all --prune', stdout: '', stderr: '', summary: 'Fetched: already up to date.', ...extra });
   await wait(300);
   ok(!btn.hidden, 'fetch button shown in desktop mode');
+  const r = btn.getBoundingClientRect(), mid = (r.left + r.right) / 2;
+  ok(Math.abs(mid - innerWidth / 2) <= 1, 'fetch button in the middle of the toolbar', mid + ' vs ' + innerWidth / 2);
+  const theme = $('#themeBtn').getBoundingClientRect(), bar = $('.toolbar').getBoundingClientRect();
+  ok(Math.abs(bar.right - 14 - theme.right) <= 1, 'the right group still ends at the right edge', theme.right + ' vs ' + bar.right);
+  ok(!$('#openBtn'),'no Open repo button (the repo menu, Ctrl/⌘ O and the empty page open one)');
 
   if (!f.remotes.length) {
     ok(btn.getAttribute('aria-disabled') === 'true' && btn.title === 'No remotes', 'no remotes: disabled with "No remotes"', btn.title);

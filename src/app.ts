@@ -2671,7 +2671,7 @@ const capOff = () => ops.size >= MAX_OPS && !opHere() ? CAP_OFF : '';
 const tabRunning = (t: Tab) => !!t.info && ops.has(t.info.lockKey);
 
 /* The toolbar and panel controls of the active tab: Fetch (its operation, the
-   cap), and Refresh, Open, Show all and the eye/solo buttons (body.op-running),
+   cap), and Refresh, Show all and the eye/solo buttons (body.op-running),
    which are off while its repo has an operation. */
 function updateFetchBtn(){
   if (!NATIVE) return;
@@ -2689,8 +2689,6 @@ function updateFetchBtn(){
   const off = opOff();
   $('#refreshBtn').setAttribute('aria-disabled', String(!!off));
   $('#refreshBtn').title = off || 'Refresh (Ctrl/⌘ R)';
-  $('#openBtn').setAttribute('aria-disabled', String(!!off));
-  $('#openBtn').title = off || 'Open repository (Ctrl/⌘ O)';
   $<HTMLButtonElement>('#showAllBtn').disabled = !!off;
   document.body.classList.toggle('op-running', !!off);
   // Undo is an operation too: off at the cap (an operation here hides the bar).
@@ -3120,10 +3118,8 @@ new ResizeObserver(scheduleDraw).observe(wrap);
 // tests/ui reads state through this; real builds have __TEST__ = false and drop it.
 if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn, nameProblem, nameClash };
 if (NATIVE) {
-  $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;
   $('#fetchBtn').hidden = false;
-  $('#openBtn').addEventListener('click', pickRepo);
   // aria-disabled instead of disabled, so the "No remotes" tooltip still shows.
   $('#fetchBtn').addEventListener('click', () => { if ($('#fetchBtn').getAttribute('aria-disabled') !== 'true') runFetch(); });
   $('#emptyOpen').addEventListener('click', pickRepo);

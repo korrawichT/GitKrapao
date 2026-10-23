@@ -52,7 +52,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
 1. Install **Git for Windows** so the `git` command works. Running `git --version` in a terminal should print a version.
 2. Download `GitKrapao_x.y.z_x64-setup.exe` from the [latest release](https://github.com/korrawichT/GitKrapao/releases/latest), run it and click through to the end. It installs for the current user only, so it needs no admin rights; a newer installer updates the app in place and keeps your settings.
    - If Windows shows "Windows protected your PC", click **More info → Run anyway**. The installer is not code-signed yet.
-3. Start the app, click **Open repo** and pick any folder inside a repository.
+3. Start the app, click **Open repository** (or the repository name at the top left, then **Open another repository…**) and pick any folder inside a repository.
 
 To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) and run `az login` once. Everything else works without it.
 
