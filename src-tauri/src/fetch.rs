@@ -80,7 +80,7 @@ fn command_text() -> String {
 
 /* ---------- lock ---------- */
 
-/// One running fetch or switch: what it is, which repo (for dialogs), and the
+/// One running operation (fetch, switch, create): what it is, which repo (for dialogs), and the
 /// slot its git process publishes its PID into (so closing the app can stop it).
 pub(crate) struct RunningOp {
     /// "Fetch" or "Switch branch".
@@ -93,7 +93,7 @@ pub(crate) struct RunningOp {
 /// across repos.
 pub(crate) type OpRegistry = Arc<Mutex<HashMap<String, RunningOp>>>;
 
-/// Marks a repo as busy (fetch or switch); dropping it (also on a panic) frees the repo.
+/// Marks a repo as busy (fetch, switch, create); dropping it (also on a panic) frees the repo.
 pub(crate) struct RepoLock {
     reg: OpRegistry,
     key: String,
@@ -130,7 +130,7 @@ pub(crate) fn is_busy(state: &AppState, dirs: &GitDirs) -> bool {
     state.busy_repos.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&dirs.lock_key)
 }
 
-/// PIDs of every git process a running fetch or switch has started.
+/// PIDs of every git process a running operation has started.
 pub(crate) fn running_pids(reg: &OpRegistry) -> Vec<u32> {
     let ops = reg.lock().unwrap_or_else(|e| e.into_inner());
     ops.values().filter_map(|op| *op.pid.lock().unwrap_or_else(|e| e.into_inner())).collect()
@@ -322,7 +322,7 @@ pub(crate) fn assess(repo: &Path, entries: &[ConfigEntry], env: &[(&str, &str)])
     Risk { shown, hash }
 }
 
-/// The trust gate shared by fetch and switch (one store, one hash per repo).
+/// The trust gate shared by fetch, switch and create (one store, one hash per repo).
 /// `op` names the operation in the dialog and in the cancel message.
 /// Fetch passes its remotes: a repo it has never fetched in is asked about
 /// once even with nothing risky, since fetching contacts those remotes.
@@ -546,7 +546,7 @@ fn fetch_summary(ok: bool, timed_out: bool, code: Option<i32>, stderr: &str, ssh
     }
 }
 
-/// A failure line shared by fetch and switch: a left-over lock file, else
+/// A failure line shared by fetch, switch and create: a left-over lock file, else
 /// git's last fatal:/error: line, else the exit code.
 pub(crate) fn git_error(stderr: &str, code: Option<i32>, what: &str) -> String {
     let l = stderr.to_ascii_lowercase();
@@ -638,7 +638,7 @@ pub(crate) fn ask_native(app: &tauri::AppHandle, title: &str, ok: &str, text: &s
     d.blocking_show()
 }
 
-/// Fetches every remote of the repo. Err only for "busy" (a fetch or switch
+/// Fetches every remote of the repo. Err only for "busy" (an operation
 /// already runs here) or a path that is not a repository; every other outcome is a
 /// GitResult so the output log can show it.
 #[tauri::command]

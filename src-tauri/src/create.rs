@@ -30,6 +30,19 @@ fn valid_name(repo: &Path, full: &str, name: &str, env: &[(&str, &str)]) -> bool
         && git_env(repo, &["check-ref-format", full], env).output().is_ok_and(|o| o.status.success())
 }
 
+/// Names Windows cannot store, the same rules as nameProblem in refname.ts.
+/// Refs are files there (also for a teammate who fetches the ref): `" < > |`,
+/// a part ending in "." (Windows drops it, so "a./b" is the file of "a/b")
+/// and device names such as con, nul, aux/x and com1.txt.
+fn windows_unsafe(name: &str) -> bool {
+    let device = |part: &str| {
+        let stem = part.split('.').next().unwrap_or(part).to_ascii_lowercase();
+        matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+            || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    };
+    name.contains(['"', '<', '>', '|']) || name.split('/').any(|p| p.ends_with('.') || device(p))
+}
+
 /// The ref under `ns` (refs/heads/ or refs/tags/) that `name` would clash
 /// with, compared without case (any letter, not only ASCII): names that
 /// differ only in case are one file on Windows and macOS, and next to a
@@ -71,6 +84,9 @@ pub(crate) fn create_in(top: &str, what: NewRef, name: &str, at: &str, cx: &Swit
     let refused = |summary: String, cancelled: bool| GitResult::not_run(format!("git {noun} ({})", sanitize(name, 120)), summary, cancelled);
     if !valid_name(repo, &format!("{ns}{name}"), name, cx.env) {
         return refused(format!("Not a valid {noun} name: \"{}\"", sanitize(name, 120)), false);
+    }
+    if windows_unsafe(name) {
+        return refused(format!("Not a valid {noun} name: \"{}\" (Windows cannot store it as a file)", sanitize(name, 120)), false);
     }
     match taken(repo, ns, name, cx.env) {
         Ok(None) => {}
@@ -414,6 +430,35 @@ mod tests {
         assert_eq!(f.refs("refs/heads/"), "refs/heads/main");
         assert_eq!(f.refs("refs/tags/"), "refs/tags/v1");
         assert!(f.trusted.borrow().is_empty() && f.asked.borrow().is_empty());
+    }
+
+    // Refs are files on Windows, so names it cannot store are refused here
+    // too, as in refname.ts: "a./b" would be the file of a packed "a/b"
+    // (Windows drops a trailing "."), which in effect moves that ref.
+    #[test]
+    fn refuses_names_windows_cannot_store() {
+        let f = Fixture::new("windows");
+        let (one, head) = (f.sha("HEAD~1"), f.sha("HEAD"));
+        f.git(&["branch", "a/b", &one]);
+        f.git(&["tag", "v1/x", &one]);
+        f.git(&["pack-refs", "--all"]);
+        for name in ["a./b", "x./y", "a\"b", "a<b", "a>b", "a|b", "con", "NUL", "aux/x", "feat/lpt9", "com1.txt", "Prn.x/y"] {
+            let r = f.create(BRANCH, name, &head);
+            assert!(!r.ok && !r.cancelled && r.exit_code.is_none(), "{name:?}: {}", r.summary);
+            assert!(r.summary.contains("Windows"), "{name:?}: {}", r.summary);
+        }
+        for name in ["v1./x", "con", "lpt1.tar"] {
+            let r = f.create(LIGHT, name, &head);
+            assert!(!r.ok && r.exit_code.is_none() && r.summary.contains("Windows"), "{name:?}: {}", r.summary);
+        }
+        assert_eq!(f.refs("refs/heads/"), "refs/heads/a/b\nrefs/heads/main");
+        assert_eq!(f.refs("refs/tags/"), "refs/tags/v1/x");
+        assert_eq!(f.sha("refs/heads/a/b"), one, "a/b did not move");
+        // Only whole parts are device names.
+        for name in ["console", "com10", "a/con-x", "auxiliary", "v1.x/y", "lpt"] {
+            let r = f.create(BRANCH, name, &head);
+            assert!(r.ok, "{name:?}: {}", r.summary);
+        }
     }
 
     // Packed refs (after a clone or gc) are no files, so git itself lets

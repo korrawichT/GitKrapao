@@ -351,7 +351,7 @@ function traceEdge(ctx: CanvasRenderingContext2D, e: Edge, n: number, Y: (y: num
 let S: AppState = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
 let sel = -1, matches: number[] = [], matchPtr = -1, matchSet: Set<number> | null = null;
 const wrap = $('#wrap'), grid = $('#grid'), body = $('#body'), detail = $('#detail');
-const tabBusy = $('#tabBusy');   // in place of the graph while the repo waits for its fetch or switch (waitForOp)
+const tabBusy = $('#tabBusy');   // in place of the graph while the repo waits for its operation (waitForOp)
 const tabLoading = $('#tabLoading');   // a spinner in the middle while a repo that is not on screen yet loads
 /* Column widths in px. graph null = wide enough for every lane, but at most a
    third of the window (a repo with many branches would push the message and
@@ -745,7 +745,7 @@ function updateView(){
   $('#sampleBadge').hidden = !S.sample;
   const note = S.note + (S.bad ? `, ${S.bad} unreadable entries skipped` : '')
     + (S.capped ? ', history cut off at 2,000,000 commits' : '');
-  // Nothing to count while the repo waits for its fetch or switch.
+  // Nothing to count while the repo waits for its operation.
   $('#stats').textContent = !tabBusy.hidden ? '' : `${(n - (S.stashRows || 0)).toLocaleString('en')}${S.more ? '+' : ''} commits, ${branches.size} branches, ${tags.size} tags${note}`;
   document.title = `${S.repo || 'Repository'} — GitKrapao`;
 }
@@ -1299,7 +1299,7 @@ function toggleIn(list: string[], ref: string){
   if (cover) return list.filter(h => h !== cover);
   return [...list.filter(h => !(ref.endsWith('/') && h.startsWith(ref))), ref];
 }
-// All off while a fetch or switch runs in the repo (opOff): the reload would have to wait for it.
+// All off while an operation runs in the repo (opOff): the reload would have to wait for it.
 function toggleHidden(ref: string){ if (opOff()) return; saveHidden(toggleIn(hiddenList(), ref)); reloadForWalk(); }
 function toggleSolo(ref: string){ if (opOff()) return; saveSolo(toggleIn(soloList(), ref)); reloadForWalk(); }
 function showAllBranches(){ if (opOff()) return; saveHidden([]); reloadForWalk(); }
@@ -2061,7 +2061,7 @@ function closeCtx(refocus: boolean){
   ctxBack = null;
 }
 const SOLO_OFF = 'Exit solo to hide branches', HEAD_OFF = 'The checked-out branch is always shown';
-const switchOff = (head: boolean) => head ? 'Already checked out' : opHere() ? 'A fetch or switch is running' : capOff();
+const switchOff = (head: boolean) => head ? 'Already checked out' : opNow() || capOff();
 
 sideList.addEventListener('contextmenu', e => {
   const el = (e.target as Element).closest<HTMLElement>('[role="treeitem"]');
@@ -2225,7 +2225,7 @@ function showEmpty(){
   $('#emptyRecent').innerHTML = items ? `<div class="t">Recent</div>${items}` : '';
 }
 
-/* The repo of the active tab has a fetch or switch running (its lock key, so
+/* The repo of the active tab has an operation (fetch, switch, create) running (its lock key, so
    maybe started from another worktree's tab): the backend refuses to read it
    until it ends, and runOp then runs the load stored here if the repo is
    still active. A repo that is not on screen yet shows a placeholder instead
@@ -2360,7 +2360,7 @@ async function openPath(path: string){
 
 async function pickRepo(){
   closeMenu();
-  if (opOff()) return;   // it would replace the repo a fetch or switch is changing
+  if (opOff()) return;   // it would replace the repo an operation is changing
   try {
     const info = await invoke('pick_repo', {});
     if (!info) return;
@@ -2373,7 +2373,7 @@ async function pickRepo(){
    One repo is loaded at a time, the active tab's; the others are only a
    path and a name (plus, in memory, the last open_repo answer and the
    selected commit). Switching drops the old repo's state and loads the new
-   one; background tabs never call the backend (a fetch or switch started
+   one; background tabs never call the backend (an operation started
    in one keeps running). */
 let tabs: Tabs = { list: [], active: -1 };   // read from lanes.tabs at boot
 const tabStrip = $('#tabStrip'), tabList = $('#tabList');
@@ -2382,11 +2382,11 @@ function renderTabs(): void {
   const focused = tabStrip.contains(document.activeElement);
   tabStrip.innerHTML = tabs.list.map((t, i) => {
     const on = i === tabs.active, run = tabRunning(t);
-    // A fetch or switch in the tab's repo: a spinner instead of the icon, and it cannot close.
+    // An operation in the tab's repo: a spinner instead of the icon, and it cannot close.
     return `<div class="tab-item${on ? ' on' : ''}${run ? ' running' : ''}" role="presentation" data-tab="${i}">`
       + `<button class="tab" role="tab" aria-selected="${on}" aria-busy="${run}" tabindex="${on ? 0 : -1}" title="${esc(t.path || NEW_TAB)}">`
       + `<span class="tab-ic">${run ? '<span class="tab-spin" aria-hidden="true"></span>' : ICON.repo}</span><span class="tab-name">${esc(t.name)}</span>`
-      + (t.err ? '<span class="tab-dot" title="The last fetch or switch failed"></span>' : '') + '</button>'
+      + (t.err ? '<span class="tab-dot" title="The last Git operation failed"></span>' : '') + '</button>'
       + `<button class="tab-x" tabindex="-1" aria-label="Close ${esc(t.name)}" aria-disabled="${run}" title="${run ? OP_OFF : 'Close tab (Ctrl+W)'}">${ICON.x}</button></div>`;
   }).join('');
   $('#tabMore').hidden = !tabs.list.length;
@@ -2396,7 +2396,7 @@ function renderTabs(): void {
 function scrollTabIntoView(){ tabStrip.querySelector('.tab-item.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
 
 // The selected commit of the tab being left, restored if it is loaded when the tab comes back.
-// A tab left while it waits for its fetch or switch (no rows) keeps the hash it had.
+// A tab left while it waits for its operation (no rows) keeps the hash it had.
 function rememberSel(t: Tab){ if (tabBusy.hidden && current && t.path === current.path) t.sel = S.commits[sel]?.hash; }
 /* Only from rows already loaded: switching never pages further to find it. */
 function restoreSel(t: Tab){
@@ -2443,7 +2443,7 @@ function newTab(): void {
 /* Closing the active tab shows its right neighbour (else the left one); closing
    another loads nothing; closing the last leaves the empty state. Recents stay. */
 function closeTab(i: number): void {
-  const t = tabs.list[i]; if (!t || tabRunning(t)) return;   // not while its repo has a fetch or switch
+  const t = tabs.list[i]; if (!t || tabRunning(t)) return;   // not while its repo has an operation
   const was = i === tabs.active, next = afterClose(tabs, i);
   tabs.list.splice(i, 1);
   tabs.active = next;
@@ -2574,29 +2574,31 @@ async function poll(){
   const path = current.path, left = () => busy || !current || current.path !== path;
   try {
     const fp = await invoke('repo_fingerprint', { path });
-    if (fp === null || left()) return;   // null: a fetch or switch is changing the repo
+    if (fp === null || left()) return;   // null: an operation is changing the repo
     if (fp !== fingerprintSeen) { await syncRepo(); if (left()) return; }
     loadPrs();   // returns at once unless PR_EVERY has passed
     loadWip();   // likewise, unless its interval has passed
   } catch (e) { /* repo moved or deleted; the next manual action will report it */ }
 }
 
-/* ---------- git operations: fetch and switch ---------- */
+/* ---------- git operations: fetch, switch, create branch / tag ---------- */
 /* One operation at a time per repository, keyed by the backend's lock key
    (linked worktrees of one repo share it, so their tabs wait together), and
    at most MAX_OPS app-wide. While the active tab's repo has one, every action
    there is off (opOff); other tabs stay free. */
-const BUSY = 'busy';           // backend error while a fetch or switch runs in the repo
-const BUSY_MSG = 'A fetch or branch switch is already running in this repository.';
+const BUSY = 'busy';           // backend error while an operation runs in the repo
+const BUSY_MSG = 'Another Git operation is already running in this repository.';
 type OpKind = 'fetch' | 'switch' | 'branch' | 'tag';   // branch / tag: create one
 const OP_BUSY: Record<OpKind, string> = { fetch: 'Fetching all remotes…', switch: 'Switching branch…', branch: 'Creating branch…', tag: 'Creating tag…' };
 interface RepoOp { kind: OpKind; pending: { info: RepoInfo; keep: boolean; manual: boolean } | null }   // pending: the load asked for meanwhile
 const ops = new Map<string, RepoOp>();       // by RepoInfo.lockKey
 const opErr = new Map<string, string>();     // by lockKey: banner text of the last failed operation, cleared by the next success
 const MAX_OPS = 3;
-const OP_OFF = 'Wait for the fetch or switch in this repository to finish';
-const CAP_OFF = '3 fetches or switches are already running; wait for one to finish';
+const OP_OFF = 'Wait for the Git operation in this repository to finish';
+const CAP_OFF = '3 Git operations are already running; wait for one to finish';
 const opHere = () => !!current && ops.has(current.lockKey);
+/* What the active repo is doing ("Creating tag…"), '' when nothing. */
+const opNow = () => { const op = current && ops.get(current.lockKey); return op ? OP_BUSY[op.kind] : ''; };
 const opOff = () => opHere() ? OP_OFF : '';
 const capOff = () => ops.size >= MAX_OPS && !opHere() ? CAP_OFF : '';
 const tabRunning = (t: Tab) => !!t.info && ops.has(t.info.lockKey);
@@ -2653,7 +2655,7 @@ async function loadRemotes(){
   } catch (e) { /* the next sync asks again */ }
 }
 
-/* One fetch or switch in the active tab's repo. The backend holds the repo's
+/* One operation (fetch, switch, create) in the active tab's repo. The backend holds the repo's
    lock meanwhile, so polls, refreshes and loads of this repo (and of its other
    worktrees) wait. Every tab of that lock key spins. The result goes to the
    Output drawer. If the repo is still the active one, a failure also goes to
@@ -2724,7 +2726,7 @@ function runSwitch(ref: string){
    it was asked for in. */
 const createDlg = $<HTMLDialogElement>('#createDlg'), cName = $<HTMLInputElement>('#cName'), cGo = $<HTMLButtonElement>('#cGo');
 let createFor: { kind: RefKind; hash: string; key: string } | null = null;
-const createOff = () => opHere() ? 'A fetch or switch is running' : capOff();
+const createOff = () => opNow() || capOff();
 function createEntries(c: Commit): CtxEntry[] {
   if (!NATIVE || c.stashRow) return [];
   const off = createOff();
@@ -2782,7 +2784,7 @@ $('#createForm').addEventListener('submit', e => {
   else runOp('tag', path => invoke('create_tag', { path, name, at: f.hash, message: msg || null }));
 });
 
-/* Output drawer: every fetch and switch, newest last, in memory only. Text from git
+/* Output drawer: every operation (fetch, switch, create), newest last, in memory only. Text from git
    only ever goes through textContent. */
 interface OutEntry { at: Date; repo: string; r: GitResult }
 const OUT_MAX = 50;
@@ -2833,7 +2835,7 @@ const menu = $('#recentMenu');
 function closeMenu(){ menu.hidden = true; $('#repoBtn').setAttribute('aria-expanded', 'false'); }
 function toggleMenu(){
   if (!menu.hidden) { closeMenu(); return; }
-  // While a fetch or switch runs here, nothing may replace this tab's repo.
+  // While an operation runs here, nothing may replace this tab's repo.
   const off = opOff(), dis = off ? ' disabled' : '';
   const items = recentButtons('menu-item', dis);
   menu.innerHTML = (off ? `<div class="hint">${esc(off)}</div>` : '') + (items || '<div class="hint">No recent repositories</div>')

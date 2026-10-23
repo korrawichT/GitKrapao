@@ -198,7 +198,7 @@ struct AppState {
     stream: Mutex<Option<Stream>>,
     next_gen: AtomicU64,
     dirs: Mutex<HashMap<String, GitDirs>>,
-    /// Fetches and switches running, by lock key (GitDirs::lock_key): one per repo.
+    /// Operations (fetch, switch, create) running, by lock key (GitDirs::lock_key): one per repo.
     busy_repos: fetch::OpRegistry,
     /// Serializes reads and writes of the trust file.
     trust_lock: Mutex<()>,
@@ -1472,7 +1472,7 @@ async fn branch_tracking(path: String) -> Result<Vec<Track>, String> {
 }
 
 #[tauri::command]
-/// None while a fetch or switch runs in the repo: its refs are changing, so the
+/// None while an operation runs in the repo: its refs are changing, so the
 /// caller skips this poll.
 async fn repo_fingerprint(path: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
     let dirs = dirs_for(&state, &path)?;
@@ -1505,7 +1505,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {
-            // Closing while a fetch or switch runs would kill git mid-way (a switch
+            // Closing while an operation runs would kill git mid-way (a switch
             // can leave the work tree half updated), so ask first.
             if let RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } = &event {
                 if label == "main" {

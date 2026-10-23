@@ -115,6 +115,13 @@ run(async () => {
   ok($('#fetchBtn').getAttribute('aria-disabled') === 'true' && $('#fetchBtn').title === 'Creating branch…', 'Fetch off meanwhile', $('#fetchBtn').title);
   ctx(msg('main work')); await wait(30);
   ok(labels() === 'Create branch here…(off),Create tag here…(off)', 'menu off while it runs', labels());
+  const why = items().map(b => b.querySelector('.p')?.textContent).join(',');
+  ok(why === 'Creating branch…,Creating branch…', 'says what is running', why);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(20);
+  const featPill = [...document.querySelectorAll('#body .pill')].find(p => p.textContent.includes('feat'));
+  ctx(featPill); await wait(30);
+  const sw = items().find(b => b.querySelector('.n').textContent === 'Switch to feat');
+  ok(sw && sw.disabled && sw.querySelector('.p').textContent === 'Creating branch…', 'Switch to is off with the same reason', sw && sw.querySelector('.p').textContent);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(20);
   const sync = count('sync_history');
   f.create(done('Created branch topic at bbbbbbb. Switched to topic.')); await wait(200);
