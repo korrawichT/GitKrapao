@@ -167,6 +167,27 @@ run(async () => {
   ok(last('restore_ref') === JSON.stringify({ path: DEMO, token: 7 }), 'Undo again, same token');
   await finish(res('Restored branch feat at ccccccc.'));
   ok(bar.hidden, 'restored: no bar');
+  // git refused the update-ref without writing (a folder feat/ in the way): the
+  // backend keeps the token and says "not run" (exitCode null), so the bar is back.
+  const delAndUndo = async token => {
+    ctx(pill('feat')); await wait(30);
+    pick('Delete branch…'); await wait(30);
+    await finish(res('Deleted.', { deleted: del(token, 'feat') }));
+    $('#undoBtn').click(); await wait(30);
+  };
+  await delAndUndo(70);
+  await finish(res("update_ref failed for ref 'refs/heads/feat': 'refs/heads/feat/x' exists", { ok: false, exitCode: null, stderr: 'fatal: x' }));
+  ok(!bar.hidden && barMsg() === 'Deleted branch feat (ccccccc)', 'git refused before writing: the bar is back', barMsg());
+  $('#bannerClose').click();
+  $('#undoBtn').click(); await wait(30);
+  ok(last('restore_ref') === JSON.stringify({ path: DEMO, token: 70 }), 'and Undo sends the same token');
+  await finish(res('Restoring took longer than 300 s and was stopped.', { ok: false, timedOut: true, exitCode: null }));
+  ok(bar.hidden, 'timed out: the token is used up, no bar');
+  $('#bannerClose').click();
+  await delAndUndo(71);
+  await finish(res('Restored branch feat at ccccccc. Its settings (upstream) were not restored: x', { ok: false, exitCode: 1 }));
+  ok(bar.hidden, 'the ref was written (a later step failed): no bar');
+  $('#bannerClose').click();
 
   // A tag, its push to origin failed: the banner and the bar both show.
   ctx(pill('v1')); await wait(30);

@@ -162,6 +162,27 @@ fn sibling_text(name: &str, other: &str, nothing: &str) -> String {
     )
 }
 
+/// `url` without the credentials in its authority, for the origin question:
+/// "user:password@" in any scheme://, and a lone "user@" in http(s), where
+/// it is often a token. scp-style "git@host:path" and paths stay as they are.
+fn no_userinfo(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    // The last "@": a password may hold a raw "@" itself.
+    let Some((user, host)) = authority.rsplit_once('@') else {
+        return url.to_string();
+    };
+    let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
+    if user.contains(':') || web {
+        format!("{scheme}://{host}{tail}")
+    } else {
+        url.to_string()
+    }
+}
+
 /// More stashes than this would not fit the Windows command line: no count.
 const MAX_STASHES: usize = 500;
 
@@ -419,7 +440,7 @@ pub(crate) fn delete_tag_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
     // Every push URL: the push goes to all of them.
     let urls: String = git_env(repo, &["remote", "get-url", "--push", "--all", "origin"], cx.env)
         .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).lines().map(|u| format!("  {}\n", sanitize(u.trim(), 200))).collect())
+        .map(|out| String::from_utf8_lossy(&out.stdout).lines().map(|u| format!("  {}\n", sanitize(&no_userinfo(u.trim()), 200))).collect())
         .unwrap_or_default();
     let text = format!(
         "Tag {shown} was deleted in this repository. Also delete it on origin?\n\n{urls}\nTeammates who already fetched it keep their copy, and Undo does not bring it back on origin."
@@ -493,6 +514,14 @@ pub(crate) fn restore_in(top: &str, token: u64, o: &OpCtx) -> GitResult {
     };
     if !succeeded(&r) {
         let w = why(&r, "Restoring", "git update-ref", cx);
+        // update-ref is atomic: when git refused (a folder "<name>/" in the
+        // way, a stale .lock) and the ref is still absent, nothing was
+        // written and the token goes back. The result is "not run" (exit code
+        // None), the page's sign to offer Undo again. Never after a timeout.
+        if !r.timed_out && matches!(exact(repo, ns, &d.name, cx.env), Ok(None)) {
+            o.undo.put_back(o.key, token, d.clone());
+            return GitResult { exit_code: None, ..steps.result(Some(&r), w, false) };
+        }
         return steps.result(Some(&r), w, false);
     }
     let restored = format!("Restored {noun} {} at {}.", d.name, d.short);
@@ -1037,6 +1066,46 @@ mod tests {
         assert_eq!(f.refs(TAGS), "");
     }
 
+    // A password or token in a URL never reaches the dialog; a user name
+    // without a password stays (ssh's "git@"), except in http(s), where a
+    // lone user is often a token.
+    #[test]
+    fn origin_urls_lose_their_credentials() {
+        for (url, shown) in [
+            ("https://me:SECRETPAT@dev.azure.com/org/p/_git/r", "https://dev.azure.com/org/p/_git/r"),
+            ("https://SECRETPAT@github.com/o/r.git", "https://github.com/o/r.git"),
+            ("HTTPS://org@dev.azure.com/org/p/_git/r", "HTTPS://dev.azure.com/org/p/_git/r"),
+            ("http://me:p@ss@host/r", "http://host/r"),
+            ("https://me:pw@host", "https://host"),
+            ("https://me:pw@host?x=1", "https://host?x=1"),
+            ("https://host/a@b", "https://host/a@b"),
+            ("ssh://git@host/r.git", "ssh://git@host/r.git"),
+            ("ssh://u:secret@host:22/r", "ssh://host:22/r"),
+            ("git@ssh.dev.azure.com:v3/org/p/r", "git@ssh.dev.azure.com:v3/org/p/r"),
+            ("C:/repos/origin.git", "C:/repos/origin.git"),
+            ("file:///C:/a@b/r.git", "file:///C:/a@b/r.git"),
+        ] {
+            assert_eq!(no_userinfo(url), shown, "{url}");
+        }
+    }
+
+    // The origin question lists every push URL without its credentials.
+    #[test]
+    fn the_origin_question_hides_credentials() {
+        let f = Fixture::new("refedit-tag-creds");
+        let bare = f.bare_origin();
+        let bare = bare.to_string_lossy().replace('\\', "/");
+        f.git(&["remote", "set-url", "--add", "--push", "origin", &bare]);
+        f.git(&["remote", "set-url", "--add", "--push", "origin", "https://me:SECRETPAT@example.invalid/r.git"]);
+        f.git(&["tag", "v1"]);
+        f.answer(&[true, false]);
+        let r = f.del_tag(&UndoStore::default(), "v1");
+        assert!(r.ok, "{}", r.summary);
+        let text = f.confirms.borrow()[1].text.clone();
+        assert!(!text.contains("SECRETPAT") && !text.contains("me:"), "{text}");
+        assert!(text.contains(&format!("  {bare}\n  https://example.invalid/r.git\n")), "{text}");
+    }
+
     /* ---------- restore ---------- */
 
     // The branch comes back at its commit with its config (the upstream),
@@ -1140,6 +1209,44 @@ exit 0
         assert!(r.ok, "{}: {}", r.summary, r.stderr);
         assert_eq!(f.sha("refs/heads/feat"), one);
         assert!(!f.restore(&undo, KEY, t).ok, "a restore that wrote the ref uses the token up");
+    }
+
+    // update-ref refused without writing (a folder "feat/" in the way, a
+    // stale lock file): the token stays and the result says "not run", so
+    // the page offers Undo again; it works once the name is free. A restore
+    // stopped at the limit uses the token up (git may have written the ref).
+    #[test]
+    fn a_restore_git_refused_keeps_the_token() {
+        let f = Fixture::new("refedit-restore-clash");
+        let one = f.sha("HEAD~1");
+        f.git(&["branch", "feat", &one]);
+        let undo = UndoStore::default();
+        let t = f.del_branch(&undo, "feat").deleted.unwrap().token;
+        f.git(&["branch", "feat/x", &one]);
+        let r = f.restore(&undo, KEY, t);
+        assert!(!r.ok && !r.timed_out && !r.cancelled && r.exit_code.is_none(), "{}", r.summary);
+        assert!(r.command.starts_with("git update-ref -m GitKrapao: undo delete refs/heads/feat "), "{}", r.command);
+        assert!(!r.stderr.is_empty() && !r.summary.is_empty(), "git's reason is kept");
+        assert_eq!(f.refs(HEADS), "refs/heads/feat/x\nrefs/heads/main");
+        f.git(&["branch", "-D", "feat/x"]);
+
+        let lock = f.repo().join(".git").join("refs").join("heads").join("feat.lock");
+        std::fs::write(&lock, "").unwrap();
+        let r = f.restore(&undo, KEY, t);
+        assert!(!r.ok && !r.timed_out && r.exit_code.is_none(), "{}", r.summary);
+        assert_eq!(f.refs(HEADS), "refs/heads/main");
+        std::fs::remove_file(&lock).unwrap();
+
+        let r = f.restore(&undo, KEY, t);
+        assert!(r.ok, "the token survived both refusals: {}: {}", r.summary, r.stderr);
+        assert_eq!(f.sha("refs/heads/feat"), one);
+
+        let t = f.del_branch(&undo, "feat").deleted.unwrap().token;
+        f.hook("reference-transaction", "#!/bin/sh\nsleep 6\n");
+        f.limit.set(Duration::from_secs(2));
+        let r = f.restore(&undo, KEY, t);
+        assert!(r.timed_out && !r.ok, "{}", r.summary);
+        assert_eq!(f.restore(&undo, KEY, t).summary, "Nothing to undo: that delete is no longer remembered.");
     }
 
     // A packed "feat" and a loose "FEAT" are one file on Windows: git would

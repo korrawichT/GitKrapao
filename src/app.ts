@@ -2239,9 +2239,10 @@ undoBtn.addEventListener('click', () => {
   const u = undoFor;
   if (!u || current?.lockKey !== u.key) return;
   runOp('restore', path => invoke('restore_ref', { path, token: u.d.token }), {
-    // Refused before anything was written (the name is taken, a trust question
-    // cancelled, 'busy'): the backend still holds the token, so offer it again.
-    // A git run that failed or timed out used it up.
+    // Nothing was written (the name is taken, a trust question cancelled,
+    // update-ref refused by git, 'busy'): the backend still holds the token and
+    // answers with no exit code, so offer it again. A timeout, or a run that
+    // wrote the ref and then failed, used it up.
     done: (r, info) => {
       if (!r.ok && r.exitCode === null && !r.timedOut && current?.lockKey === info.lockKey) showUndo(u.d, u.key);
       return false;
