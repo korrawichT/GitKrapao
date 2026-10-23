@@ -7,6 +7,10 @@
   --lanes:#0b8fb3,#3f7cf6,#a454f0,#e341c3,#f23f5f,#d46210,#a87d00,#3d9a2a,#13977a;
   --add:#1a7f37; --del:#cf222e;
   --sx-kw:#cf222e; --sx-st:#0a3069; --sx-cm:#6e7781; --sx-nu:#0550ae; --sx-fn:#8250df; --sx-ty:#953800; --sx-tg:#116329;
+  --scroll:#c3c9d2;
+  /* color-scheme: the WebView draws scrollbars and form controls for this theme
+     (white scrollbars on the dark theme otherwise); scrollbar-color is inherited */
+  color-scheme:light; scrollbar-color:var(--scroll) transparent;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
   padding-bottom:env(safe-area-inset-bottom,0px);
@@ -20,6 +24,7 @@
     --lanes:#17abd4,#3f7cf6,#a454f0,#e341c3,#ff4d6a,#ff8c32,#f2c230,#62cc4a,#25cfa4;
     --add:#3fb950; --del:#f85149;
     --sx-kw:#ff7b72; --sx-st:#a5d6ff; --sx-cm:#8b949e; --sx-nu:#79c0ff; --sx-fn:#d2a8ff; --sx-ty:#ffa657; --sx-tg:#7ee787;
+    --scroll:#4a5260; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
@@ -30,6 +35,7 @@
   --lanes:#17abd4,#3f7cf6,#a454f0,#e341c3,#ff4d6a,#ff8c32,#f2c230,#62cc4a,#25cfa4;
   --add:#3fb950; --del:#f85149;
   --sx-kw:#ff7b72; --sx-st:#a5d6ff; --sx-cm:#8b949e; --sx-nu:#79c0ff; --sx-fn:#d2a8ff; --sx-ty:#ffa657; --sx-tg:#7ee787;
+  --scroll:#4a5260; color-scheme:dark;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:border-box}
@@ -43,13 +49,22 @@ button{font:inherit;color:inherit}
 .app{display:flex;flex-direction:column;height:100%}
 
 /* toolbar */
-.toolbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
+/* three columns: Fetch and Create branch sit in the middle of the window whatever the sides hold */
+.toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;column-gap:10px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
+.tb-l,.tb-r{display:flex;align-items:center;gap:10px;min-width:0}
+.tb-l{grid-column:1}
+.tb-r{grid-column:3;justify-content:flex-end}   /* column 3 also when the middle is empty (browser mode) */
+.tb-mid{grid-column:2;display:flex;align-items:center;gap:6px}
+/* larger than the other toolbar buttons: the repo's main actions */
+.tb-mid .icon-btn{width:36px;height:36px;margin:-3px 0}
+.tb-mid svg{width:19px;height:19px}
+.tb-mid #fetchBtn .spin{width:15px;height:15px}
 .repo{display:flex;flex-direction:column;line-height:1.25;min-width:0}
 .repo .lbl{font-size:11px;color:var(--text-3)}
 .repo .val{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .sep{width:1px;height:28px;background:var(--border);flex:none}
 .badge{font-size:11px;font-weight:500;padding:2px 7px;border-radius:10px;background:var(--panel-2);color:var(--text-2);white-space:nowrap}
-.stats{color:var(--text-3);font-size:12px;white-space:nowrap}
+.stats{color:var(--text-3);font-size:12px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .spacer{flex:1}
 .search{display:flex;align-items:center;gap:6px;height:30px;width:260px;min-width:0;padding:0 8px;border-radius:6px;background:var(--panel-2);border:1px solid var(--border)}
 .search:focus-within{border-color:var(--accent)}
@@ -60,7 +75,7 @@ button{font:inherit;color:inherit}
 .btn:hover{border-color:var(--text-3)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.sm{height:24px;padding:0 8px;font-size:12px}
-.icon-btn{width:30px;height:30px;padding:0;justify-content:center}
+.icon-btn{width:30px;height:30px;padding:0;justify-content:center;flex:none}
 
 /* repository tabs (desktop): the active tab takes the toolbar's color and
    covers the strip's bottom line, so it reads as part of the toolbar below */
@@ -91,7 +106,8 @@ button{font:inherit;color:inherit}
 .tabs-btn svg{display:block}
 .tabs-spacer{flex:1;min-width:8px}
 .tabs-more-wrap{position:relative;flex:none}
-.tabs-menu{top:calc(100% + 4px);left:auto;right:0;max-height:min(420px,70vh);overflow:auto}
+/* .menu.tabs-menu: .menu (left:-7px) comes later in this file and would push it off the window's right edge */
+.menu.tabs-menu{top:calc(100% + 4px);left:auto;right:0;max-height:min(420px,70vh);overflow:auto}
 .tabs-menu .menu-item.on .n{font-weight:600}
 
 /* main */
@@ -192,6 +208,17 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .modal textarea{width:100%;height:170px;resize:vertical;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:12px/1.45 ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;padding:8px;white-space:pre;overflow:auto}
 .m-row{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap}
 .err{color:#e5484d;font-size:12px}
+/* create branch / tag: a <dialog>, so the page behind is inert while it is open.
+   The padding is on the form: a click on the dialog itself is on the backdrop. */
+dialog.modal{color:var(--text);padding:0;width:min(440px,calc(100% - 24px))}
+dialog.modal::backdrop{background:rgba(10,14,20,.55)}
+.create-form{padding:18px 20px}
+.c-at{display:flex;align-items:baseline;gap:8px;min-width:0}
+.c-at code{flex:none}
+.c-at span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-err{min-height:16px;margin:-6px 0 6px}
+.chk{display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.create-form .btn:disabled{opacity:.55;cursor:default}
 
 @media (max-width:900px){
   .stats,.sep.s2,.badge{display:none}
@@ -202,7 +229,8 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
   .d-close{display:inline-flex}
 }
 @media (max-width:560px){
-  .toolbar{flex-wrap:wrap}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px}
+  .tb-l,.tb-r{display:contents}
   .search{order:5;flex-basis:100%}
   .btn-label{display:none}
 }
@@ -210,7 +238,8 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 
 /* desktop additions */
 .repo-wrap{position:relative;min-width:0}
-.repo-btn{border:0;background:transparent;padding:3px 7px;margin:-3px -7px;border-radius:6px;text-align:left;cursor:pointer}
+/* max-width: shrinks with .repo-wrap when the toolbar's left column is narrow (the name then ends in "…") */
+.repo-btn{border:0;background:transparent;padding:3px 7px;margin:-3px -7px;border-radius:6px;text-align:left;cursor:pointer;max-width:calc(100% + 14px)}
 .repo-btn:hover{background:var(--panel-2)}
 .repo-btn.static{cursor:default}
 .repo-btn.static:hover{background:transparent}
@@ -228,6 +257,11 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .menu-item .p{white-space:normal}
 .banner{display:flex;align-items:center;gap:10px;padding:8px 14px;background:rgba(229,72,77,.12);border-bottom:1px solid rgba(229,72,77,.35);color:var(--text);flex:none;font-size:12.5px}
 .banner span{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
+/* After a delete: Undo restores the branch or tag (local only). */
+.undo-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel-2);border-bottom:1px solid var(--border);color:var(--text);flex:none;font-size:12.5px}
+.undo-bar>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.undo-bar .icon-btn{width:24px}
+.undo-bar .btn:disabled{opacity:.55;cursor:default}
 .empty-state{position:absolute;inset:0;z-index:10;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center}
 .empty-state h2{margin:8px 0 0;font-size:18px;font-weight:600}
 .empty-state p{margin:0 0 6px;color:var(--text-2);max-width:42ch;line-height:1.5}
@@ -386,8 +420,14 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 /* fetch (toolbar button, ahead/behind, output drawer) */
 .br-row{display:flex;align-items:baseline;gap:6px;min-width:0}
 .ab{font-size:12px;color:var(--text-2);white-space:nowrap;font-variant-numeric:tabular-nums}
-#fetchBtn[aria-disabled="true"],#refreshBtn[aria-disabled="true"],#openBtn[aria-disabled="true"]{opacity:.55;cursor:default}
-#fetchBtn[aria-disabled="true"]:hover,#refreshBtn[aria-disabled="true"]:hover,#openBtn[aria-disabled="true"]:hover{border-color:var(--border)}
+#fetchBtn[aria-disabled="true"],#branchBtn[aria-disabled="true"],#refreshBtn[aria-disabled="true"]{opacity:.55;cursor:default}
+#refreshBtn[aria-disabled="true"]:hover{border-color:var(--border)}
+/* no background or border; a light fill on hover (none while off) */
+.btn.ghost{background:transparent;border-color:transparent}
+.btn.ghost:hover{background:var(--panel-2);border-color:transparent}
+.btn.ghost[aria-disabled="true"]:hover{background:transparent}
+/* High Contrast drops the hover fill: keep a visible button edge */
+@media (forced-colors:active){.btn.ghost{border-color:ButtonText}}
 #fetchBtn.running{opacity:1}
 #fetchBtn .spin{display:none;width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .8s linear infinite}
 #fetchBtn.running .spin{display:inline-block}

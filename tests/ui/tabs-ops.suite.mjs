@@ -72,10 +72,10 @@ run(async () => {
   const f = window.__fake, $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const A = 'C:/fake/a', B = 'C:/fake/b', C = 'C:/fake/c', D = 'C:/fake/d', AWT = 'C:/fake/a-wt';
   const FETCHING = 'Fetching… the history loads when it finishes';
-  const CAP = '3 fetches or switches are already running; wait for one to finish';
+  const CAP = '3 Git operations are already running; wait for one to finish';
   const SWITCHING = 'Switching branch… the history loads when it finishes';
-  const WAIT = 'Wait for the fetch or switch in this repository to finish';
-  const BUSY_MSG = 'A fetch or branch switch is already running in this repository.';
+  const WAIT = 'Wait for the Git operation in this repository to finish';
+  const BUSY_MSG = 'Another Git operation is already running in this repository.';
   const tabs = () => $$('#tabs [role=tab]'), items = () => $$('#tabs .tab-item');
   const names = () => tabs().map(t => t.querySelector('.tab-name').textContent);
   const active = () => tabs().findIndex(t => t.getAttribute('aria-selected') === 'true');

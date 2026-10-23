@@ -15,7 +15,7 @@ use super::*;
 
 /// A checkout can run LFS filters and a post-checkout hook, so it gets more
 /// time than a fetch; killing it can leave the work tree half updated.
-const LIMIT: Duration = Duration::from_secs(300);
+pub(crate) const LIMIT: Duration = Duration::from_secs(300);
 const MAX_OUTPUT: usize = 1 << 20;
 const MAX_FILES: usize = 20;
 
@@ -39,6 +39,8 @@ fn parse_target(target: &str, remotes: &[String]) -> Option<Target> {
         .map(|r| Target::Remote { remote: r.clone(), name: rest[r.len() + 1..].to_string() })
 }
 
+/// Copy, so a step can run with another limit (`SwitchCtx { limit, ..*cx }`).
+#[derive(Clone, Copy)]
 pub(crate) struct SwitchCtx<'a> {
     /// Asks whether to stash and switch; true = stash.
     pub ask: &'a dyn Fn(&str) -> bool,
@@ -62,7 +64,7 @@ const SAFE_CONFIG: &[&str] = &["-c", "maintenance.auto=false", "-c", "gc.auto=0"
 
 /// The steps that ran, joined for the Output drawer.
 #[derive(Default)]
-struct Steps {
+pub(crate) struct Steps {
     command: Vec<String>,
     stdout: Vec<String>,
     stderr: Vec<String>,
@@ -70,7 +72,7 @@ struct Steps {
 }
 
 impl Steps {
-    fn run(&mut self, repo: &Path, args: &[&str], cx: &SwitchCtx) -> Result<Limited, String> {
+    pub(crate) fn run(&mut self, repo: &Path, args: &[&str], cx: &SwitchCtx) -> Result<Limited, String> {
         self.command.push(format!("git {}", args.join(" ")));
         let r = run_limited(git_env(repo, &[SAFE_CONFIG, args].concat(), cx.env), cx.limit, MAX_OUTPUT, cx.pid).map_err(spawn_error)?;
         self.elapsed += r.elapsed;
@@ -80,7 +82,7 @@ impl Steps {
         Ok(r)
     }
 
-    fn result(self, last: Option<&Limited>, summary: String, cancelled: bool) -> GitResult {
+    pub(crate) fn result(self, last: Option<&Limited>, summary: String, cancelled: bool) -> GitResult {
         let join = |v: Vec<String>| v.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
         GitResult {
             ok: last.is_some_and(|r| !r.timed_out && r.status.is_some_and(|s| s.success())),
@@ -92,11 +94,12 @@ impl Steps {
             stdout: join(self.stdout),
             stderr: join(self.stderr),
             summary,
+            deleted: None,
         }
     }
 }
 
-fn succeeded(r: &Limited) -> bool {
+pub(crate) fn succeeded(r: &Limited) -> bool {
     !r.timed_out && r.status.is_some_and(|s| s.success())
 }
 
@@ -142,7 +145,7 @@ fn timeout_text() -> String {
     )
 }
 
-fn rev(repo: &Path, r: &str, env: &[(&str, &str)]) -> Option<String> {
+pub(crate) fn rev(repo: &Path, r: &str, env: &[(&str, &str)]) -> Option<String> {
     let o = git_env(repo, &["rev-parse", "-q", "--verify", &format!("{r}^{{commit}}")], env).output().ok()?;
     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
@@ -329,8 +332,8 @@ pub(crate) async fn switch_branch(app: tauri::AppHandle, path: String, target: S
         let state = app.state::<AppState>();
         let ask_title = format!("Switch branch — {}: uncommitted changes", info.name);
         let trust_title = format!("Switch branch — {}: trust this repository?", info.name);
-        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", text);
-        let trust = |text: &str| ask_native(&app, &trust_title, "Switch", text);
+        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", "Cancel", text);
+        let trust = |text: &str| ask_native(&app, &trust_title, "Switch", "Cancel", text);
         switch_in(&info.path, &target, &SwitchCtx {
             ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&*pid),
         })

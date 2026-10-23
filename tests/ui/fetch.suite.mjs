@@ -47,6 +47,28 @@ run(async () => {
     command: 'git fetch --all --prune', stdout: '', stderr: '', summary: 'Fetched: already up to date.', ...extra });
   await wait(300);
   ok(!btn.hidden, 'fetch button shown in desktop mode');
+  const r = $('.tb-mid').getBoundingClientRect(), mid = (r.left + r.right) / 2;
+  ok(Math.abs(mid - innerWidth / 2) <= 1 && $('.tb-mid').contains(btn) && $('.tb-mid').contains($('#branchBtn')),
+    'Fetch and Create branch in the middle of the toolbar', mid + ' vs ' + innerWidth / 2);
+  const bs = getComputedStyle(btn);
+  ok(bs.backgroundColor === 'rgba(0, 0, 0, 0)' && bs.borderTopColor === 'rgba(0, 0, 0, 0)', 'no background or border', bs.backgroundColor + ' / ' + bs.borderTopColor);
+  ok(btn.textContent.trim() === '' && btn.getAttribute('aria-label') === 'Fetch' && btn.title === (f.remotes.length ? 'Fetch all remotes (Ctrl/⌘ Shift F)' : 'No remotes'),
+    'icon only: name and tooltip', JSON.stringify([btn.textContent, btn.getAttribute('aria-label'), btn.title]));
+  const theme = $('#themeBtn').getBoundingClientRect(), bar = $('.toolbar').getBoundingClientRect();
+  ok(Math.abs(bar.right - 14 - theme.right) <= 1, 'the right group still ends at the right edge', theme.right + ' vs ' + bar.right);
+  // About 1000px wide with long names: the left group shrinks (names end in
+  // "…") instead of its items running over each other or the middle.
+  const tb = $('.toolbar'), keep = [$('#repoName').textContent, $('#headName').textContent];
+  tb.style.width = '1000px';
+  $('#repoName').textContent = 'a-very-long-repository-name-for-testing';
+  $('#headName').textContent = 'feature/a-very-long-branch-name-here';
+  const kids = [...$('.tb-l').children].filter(e => e.getBoundingClientRect().width > 0).map(e => e.getBoundingClientRect());
+  const overlap = kids.slice(1).some((k, i) => k.left < kids[i].right - 0.5)
+    || $('#repoBtn').getBoundingClientRect().right > $('.tb-l .sep').getBoundingClientRect().left;   // the button reaches 7px past its box
+  ok(!overlap && kids[kids.length - 1].right <= $('.tb-mid').getBoundingClientRect().left + 0.5 && Math.round($('#sideBtn').getBoundingClientRect().width) === 30,
+    'narrow toolbar, long names: no overlap', JSON.stringify(kids.map(k => [Math.round(k.left), Math.round(k.right)])));
+  tb.style.width = ''; [$('#repoName').textContent, $('#headName').textContent] = keep;
+  ok(!$('#openBtn'), 'no Open repo button (the repo menu, Ctrl/⌘ O and the empty page open one)');
 
   if (!f.remotes.length) {
     ok(btn.getAttribute('aria-disabled') === 'true' && btn.title === 'No remotes', 'no remotes: disabled with "No remotes"', btn.title);
@@ -66,7 +88,7 @@ run(async () => {
   btn.click(); await wait(20);
   ok(count('fetch') === 1, 'click starts a fetch');
   ok(btn.classList.contains('running') && btn.getAttribute('aria-disabled') === 'true' && btn.getAttribute('aria-busy') === 'true', 'spinner and disabled while running');
-  ok($('#fetchLabel').textContent === 'Fetching…', 'label while running', $('#fetchLabel').textContent);
+  ok(btn.getAttribute('aria-label') === 'Fetching' && btn.title === 'Fetching all remotes…', 'icon only: name and tooltip while running', btn.getAttribute('aria-label') + ' | ' + btn.title);
   const fp = count('repo_fingerprint'), ws = count('work_status'), sync = count('sync_history');
   await wait(10000);
   ok(count('repo_fingerprint') === fp && count('work_status') === ws, 'no polling during the fetch', (count('repo_fingerprint') - fp) + ' polls');
