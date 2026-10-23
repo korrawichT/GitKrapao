@@ -7,6 +7,7 @@
     "build": "node scripts/tauri.mjs build",
     "tauri": "node scripts/tauri.mjs",
     "mock": "node scripts/mock-repo.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "web:build": "node scripts/web.mjs",
     "web:watch": "node scripts/web.mjs --watch",
     "test:ui": "node tests/ui/run.mjs",
