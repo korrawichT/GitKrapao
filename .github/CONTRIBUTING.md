@@ -33,6 +33,10 @@ Security problems go through private reporting instead, see [SECURITY.md](SECURI
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) in English: `type(scope): description`, for example `feat(toolbar): add a create branch button` or `fix(tabs): keep the tab list inside the window`. Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`.
 - Keep user-facing text short and plain English.
 
+## License
+
+By contributing, you agree that your contribution is licensed under the [MIT License](../LICENSE) of this project.
+
 ## Code of conduct
 
 Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
