@@ -35,6 +35,10 @@ export interface Commands {
   list_remotes: { args: { path: string }; result: string[] };
   /** target: refs/heads/x or refs/remotes/<remote>/x. Rejects with 'busy' like fetch. */
   switch_branch: { args: { path: string; target: string }; result: GitResult };
+  /** at: a commit hash; checkout: switch to the new branch afterwards. Rejects with 'busy' like fetch. */
+  create_branch: { args: { path: string; name: string; at: string; checkout: boolean }; result: GitResult };
+  /** at: a commit hash; message: annotated tag, null: lightweight. Rejects with 'busy' like fetch. */
+  create_tag: { args: { path: string; name: string; at: string; message: string | null }; result: GitResult };
 }
 
 const core = window.__TAURI__?.core;

@@ -16,6 +16,8 @@ import type { WorkFile } from './bindings/WorkFile';
 import type { WorkStatus } from './bindings/WorkStatus';
 import type { Tab, Tabs } from './tabs';
 import { NEW_TAB, afterClose, baseName, cycle, indexOfPath, loadTabs, nth, saveTabs } from './tabs';
+import type { RefKind } from './refname';
+import { nameClash, nameProblem } from './refname';
 
 (() => {
 'use strict';
@@ -2093,9 +2095,24 @@ function pillGroup(e: Event): RefGroup | null {
 }
 /* The local branch when there is one; a group without it is on a remote. */
 const groupRef = (g: RefGroup) => g.local ? 'refs/heads/' + g.name : `refs/remotes/${g.remotes[0]}/${g.name}`;
+/* Index of the commit row (or "+N" box) under the event; -1 for none and for the WIP row. */
+function eventRow(e: Event): number {
+  const host = (e.target as Element).closest<HTMLElement>('.row, .ref-pop');
+  return host && host !== wipRow ? +host.dataset.i! : -1;   // rows and the box carry data-i
+}
 body.addEventListener('contextmenu', e => {
-  const g = pillGroup(e);
-  if (!g) return;
+  const g = pillGroup(e), i = eventRow(e), c = S.commits[i];
+  if (!g) {
+    // Elsewhere on a commit row: create a branch or tag there. Over text
+    // selected in the row, the WebView's own menu (Copy) stays instead.
+    const s = getSelection();
+    if (s && !s.isCollapsed && s.containsNode(e.target as Node, true)) return;
+    const entries = c ? createEntries(c) : [];
+    if (!entries.length) return;
+    select(i);
+    openCtx(e, entries, null);
+    return;
+  }
   const refs = (g.local ? ['refs/heads/' + g.name] : []).concat(g.remotes.map(r => `refs/remotes/${r}/${g.name}`));
   const solo = soloList().length > 0;
   const entries: CtxEntry[] = [
@@ -2103,6 +2120,7 @@ body.addEventListener('contextmenu', e => {
     { label: 'Copy branch name', run: () => copyText(g.local ? g.name : `${g.remotes[0]}/${g.name}`) },
   ];
   if (NATIVE) entries.unshift({ label: `Switch to ${g.local ? g.name : `${g.remotes[0]}/${g.name}`}`, off: switchOff(g.head), run: () => runSwitch(groupRef(g)) });
+  if (c) entries.push(...createEntries(c));
   openCtx(e, entries, null);
 });
 ctxMenu.addEventListener('click', e => {
@@ -2218,7 +2236,7 @@ function waitForOp(info: RepoInfo, op: RepoOp, keep: boolean, manual: boolean){
   current = info; fingerprintSeen = null;
   stashes = []; stashPath = null;
   $('#emptyState').hidden = true;
-  $('#tabBusyText').textContent = `${op.kind === 'fetch' ? 'Fetching…' : 'Switching branch…'} the history loads when it finishes`;
+  $('#tabBusyText').textContent = `${op.kind === 'fetch' ? 'Fetching…' : OP_BUSY[op.kind]} the history loads when it finishes`;
   tabBusy.hidden = false; tabLoading.hidden = true;
   setData([], info.name, false);   // empty graph and panel, the repo's name in the toolbar
   detailFor = null; detail.innerHTML = '<div class="empty">Select a commit to see details</div>';
@@ -2570,7 +2588,8 @@ async function poll(){
    there is off (opOff); other tabs stay free. */
 const BUSY = 'busy';           // backend error while a fetch or switch runs in the repo
 const BUSY_MSG = 'A fetch or branch switch is already running in this repository.';
-type OpKind = 'fetch' | 'switch';
+type OpKind = 'fetch' | 'switch' | 'branch' | 'tag';   // branch / tag: create one
+const OP_BUSY: Record<OpKind, string> = { fetch: 'Fetching all remotes…', switch: 'Switching branch…', branch: 'Creating branch…', tag: 'Creating tag…' };
 interface RepoOp { kind: OpKind; pending: { info: RepoInfo; keep: boolean; manual: boolean } | null }   // pending: the load asked for meanwhile
 const ops = new Map<string, RepoOp>();       // by RepoInfo.lockKey
 const opErr = new Map<string, string>();     // by lockKey: banner text of the last failed operation, cleared by the next success
@@ -2596,7 +2615,7 @@ function updateFetchBtn(){
   $('#fetchLabel').textContent = here ? 'Fetching…' : 'Fetch';
   b.setAttribute('aria-label', here ? 'Fetching' : 'Fetch');
   // The operation first: a repo waiting for it shows no remotes yet.
-  b.title = here ? 'Fetching all remotes…' : op ? 'Switching branch…' : none ? 'No remotes'
+  b.title = op ? OP_BUSY[op.kind] : none ? 'No remotes'
     : cap || 'Fetch all remotes (Ctrl/⌘ Shift F)';
   const off = opOff();
   $('#refreshBtn').setAttribute('aria-disabled', String(!!off));
@@ -2640,13 +2659,14 @@ async function loadRemotes(){
    Output drawer. If the repo is still the active one, a failure also goes to
    the banner and opens the drawer, then the graph syncs once (or runs the load
    asked for meanwhile). In the background it is only logged and a failure
-   marks its tabs; activating one loads it in full anyway. */
-async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>){
+   marks its tabs; activating one loads it in full anyway. `switching`: it may
+   check out another branch (a switch, or a new branch with checkout). */
+async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>, switching = kind === 'switch'){
   if (!NATIVE || !current || opHere() || capOff()) return;
   const info = current, key = info.lockKey, at = new Date();
   const op: RepoOp = { kind, pending: null };
   ops.set(key, op); updateFetchBtn(); renderTabs();
-  if (kind === 'switch') { $('#headName').textContent = 'Switching…'; $('#headTrack').hidden = true; }
+  if (switching) { $('#headName').textContent = 'Switching…'; $('#headTrack').hidden = true; }
   let r: GitResult;
   try {
     r = await call(info.path);
@@ -2672,7 +2692,7 @@ async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>){
     opErr.delete(key);
   }
   updateFetchBtn(); renderTabs();
-  if (kind === 'switch' && S.commits.length) updateView();   // branch name and ↑↓ until the sync below
+  if (switching && S.commits.length) updateView();   // branch name and ↑↓ until the sync below
   const p = op.pending, waited = !tabBusy.hidden;
   if (!p) await syncRepo();
   else {
@@ -2694,6 +2714,73 @@ function runFetch(){
 function runSwitch(ref: string){
   runOp('switch', path => invoke('switch_branch', { path, target: ref }));
 }
+
+/* ---------- create a branch or tag at a commit ---------- */
+/* Right-click a commit row, or a label on it: "Create branch here…" /
+   "Create tag here…" (desktop only; not on the WIP row or a stash). The
+   dialog checks the name as it is typed (refname.ts) and the backend checks
+   again with git. It keeps the commit's hash and the repo's lock key, not a
+   row: a sync can move rows while it is open, and the ref must go to the repo
+   it was asked for in. */
+const createDlg = $<HTMLDialogElement>('#createDlg'), cName = $<HTMLInputElement>('#cName'), cGo = $<HTMLButtonElement>('#cGo');
+let createFor: { kind: RefKind; hash: string; key: string } | null = null;
+const createOff = () => opHere() ? 'A fetch or switch is running' : capOff();
+function createEntries(c: Commit): CtxEntry[] {
+  if (!NATIVE || c.stashRow) return [];
+  const off = createOff();
+  return [
+    { label: 'Create branch here…', off, run: () => openCreate('branch', c) },
+    { label: 'Create tag here…', off, run: () => openCreate('tag', c) },
+  ];
+}
+/* Short names of the refs of that kind, from the snapshot the labels use. */
+function refNames(kind: RefKind){
+  const pre = kind === 'branch' ? 'refs/heads/' : 'refs/tags/';
+  return (S.refs ? S.refs.refs : []).filter(([, r]) => r.startsWith(pre)).map(([, r]) => r.slice(pre.length));
+}
+function checkCreate(){
+  if (!createFor) return;
+  const name = cName.value, why = nameProblem(name, createFor.kind) || nameClash(name, createFor.kind, refNames(createFor.kind));
+  $('#cErr').textContent = why;
+  cName.setAttribute('aria-invalid', String(!!why));
+  cGo.disabled = !name || !!why;
+}
+function openCreate(kind: RefKind, c: Commit){
+  if (!current || createOff() || createDlg.open) return;
+  createFor = { kind, hash: c.hash, key: current.lockKey };
+  const branch = kind === 'branch';
+  $('#cTitle').textContent = branch ? 'Create branch' : 'Create tag';
+  cGo.textContent = branch ? 'Create branch' : 'Create tag';
+  $('#cLabel').textContent = branch ? 'Branch name' : 'Tag name';
+  $('#cHash').textContent = c.hash.slice(0, 7);
+  $('#cSubject').textContent = c.subject;
+  $('#cSwitchRow').hidden = !branch;
+  $('#cMsgRow').hidden = branch;
+  cName.value = '';
+  $<HTMLInputElement>('#cMsg').value = '';
+  $<HTMLInputElement>('#cSwitch').checked = true;
+  checkCreate();
+  createDlg.showModal();
+  cName.focus();
+}
+function closeCreate(){ createFor = null; if (createDlg.open) createDlg.close(); }
+// 'close' comes later, as a task: by then the dialog may be open again for another commit.
+createDlg.addEventListener('close', () => { if (!createDlg.open) createFor = null; });
+// A click on the backdrop closes it, unless it started inside (selecting text and letting go outside).
+let downOnBackdrop = false;
+createDlg.addEventListener('pointerdown', e => { downOnBackdrop = e.target === createDlg; });
+createDlg.addEventListener('click', e => { if (downOnBackdrop && e.target === createDlg) closeCreate(); });
+cName.addEventListener('input', checkCreate);
+$('#cCancel').addEventListener('click', closeCreate);
+$('#createForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = createFor, name = cName.value, msg = $<HTMLInputElement>('#cMsg').value.trim(), checkout = $<HTMLInputElement>('#cSwitch').checked;
+  if (!f || cGo.disabled) return;
+  closeCreate();
+  if (current?.lockKey !== f.key) return;   // its repo is no longer the active one
+  if (f.kind === 'branch') runOp('branch', path => invoke('create_branch', { path, name, at: f.hash, checkout }), checkout);
+  else runOp('tag', path => invoke('create_tag', { path, name, at: f.hash, message: msg || null }));
+});
 
 /* Output drawer: every fetch and switch, newest last, in memory only. Text from git
    only ever goes through textContent. */
@@ -2786,6 +2873,12 @@ $('#q').addEventListener('keydown', e => {
 });
 document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
+  // The create dialog keeps the keys: no shortcut acts on the page behind it.
+  if (createDlg.open) {
+    if ((mod && e.key.toLowerCase() === 'r') || e.key === 'F5') e.preventDefault();   // never reload the page
+    else if (e.key === 'Escape') { e.preventDefault(); closeCreate(); }
+    return;
+  }
   if (NATIVE) {
     // Stop the webview from reloading the page (which would drop all state).
     if ((mod && e.key.toLowerCase() === 'r') || e.key === 'F5') { e.preventDefault(); refresh(); return; }
@@ -2880,7 +2973,7 @@ new ResizeObserver(scheduleDraw).observe(wrap);
 
 /* ---------- boot ---------- */
 // tests/ui reads state through this; real builds have __TEST__ = false and drop it.
-if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn };
+if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn, nameProblem, nameClash };
 if (NATIVE) {
   $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;

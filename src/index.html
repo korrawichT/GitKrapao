@@ -117,6 +117,19 @@
   </div>
 </div>
 
+<dialog class="modal create-dlg" id="createDlg" aria-labelledby="cTitle">
+  <form class="create-form" id="createForm" autocomplete="off">
+    <h3 id="cTitle">Create branch</h3>
+    <p class="c-at">at <code id="cHash"></code><span id="cSubject"></span></p>
+    <label class="f" for="cName" id="cLabel">Branch name</label>
+    <input type="text" id="cName" spellcheck="false" aria-describedby="cErr">
+    <div class="err c-err" id="cErr" aria-live="polite"></div>
+    <div id="cMsgRow"><label class="f" for="cMsg">Message (optional: makes an annotated tag)</label><input type="text" id="cMsg" spellcheck="false"></div>
+    <div id="cSwitchRow"><label class="chk"><input type="checkbox" id="cSwitch" checked>Switch to the new branch</label></div>
+    <div class="m-row"><span class="spacer"></span><button type="button" class="btn" id="cCancel">Cancel</button><button type="submit" class="btn primary" id="cGo">Create branch</button></div>
+  </form>
+</dialog>
+
 <div class="menu ctx-menu" id="ctxMenu" role="menu" tabindex="-1" hidden></div>
 
 <script src="app.js"></script>

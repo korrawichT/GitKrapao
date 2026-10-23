@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
+mod create;
 mod fetch;
 mod switch;
 
@@ -1500,7 +1501,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, stop_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch])
+        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, stop_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch, create::create_branch, create::create_tag])
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {

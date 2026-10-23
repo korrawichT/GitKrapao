@@ -15,7 +15,7 @@ use super::*;
 
 /// A checkout can run LFS filters and a post-checkout hook, so it gets more
 /// time than a fetch; killing it can leave the work tree half updated.
-const LIMIT: Duration = Duration::from_secs(300);
+pub(crate) const LIMIT: Duration = Duration::from_secs(300);
 const MAX_OUTPUT: usize = 1 << 20;
 const MAX_FILES: usize = 20;
 
@@ -62,7 +62,7 @@ const SAFE_CONFIG: &[&str] = &["-c", "maintenance.auto=false", "-c", "gc.auto=0"
 
 /// The steps that ran, joined for the Output drawer.
 #[derive(Default)]
-struct Steps {
+pub(crate) struct Steps {
     command: Vec<String>,
     stdout: Vec<String>,
     stderr: Vec<String>,
@@ -70,7 +70,7 @@ struct Steps {
 }
 
 impl Steps {
-    fn run(&mut self, repo: &Path, args: &[&str], cx: &SwitchCtx) -> Result<Limited, String> {
+    pub(crate) fn run(&mut self, repo: &Path, args: &[&str], cx: &SwitchCtx) -> Result<Limited, String> {
         self.command.push(format!("git {}", args.join(" ")));
         let r = run_limited(git_env(repo, &[SAFE_CONFIG, args].concat(), cx.env), cx.limit, MAX_OUTPUT, cx.pid).map_err(spawn_error)?;
         self.elapsed += r.elapsed;
@@ -80,7 +80,7 @@ impl Steps {
         Ok(r)
     }
 
-    fn result(self, last: Option<&Limited>, summary: String, cancelled: bool) -> GitResult {
+    pub(crate) fn result(self, last: Option<&Limited>, summary: String, cancelled: bool) -> GitResult {
         let join = |v: Vec<String>| v.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
         GitResult {
             ok: last.is_some_and(|r| !r.timed_out && r.status.is_some_and(|s| s.success())),
@@ -96,7 +96,7 @@ impl Steps {
     }
 }
 
-fn succeeded(r: &Limited) -> bool {
+pub(crate) fn succeeded(r: &Limited) -> bool {
     !r.timed_out && r.status.is_some_and(|s| s.success())
 }
 
@@ -142,7 +142,7 @@ fn timeout_text() -> String {
     )
 }
 
-fn rev(repo: &Path, r: &str, env: &[(&str, &str)]) -> Option<String> {
+pub(crate) fn rev(repo: &Path, r: &str, env: &[(&str, &str)]) -> Option<String> {
     let o = git_env(repo, &["rev-parse", "-q", "--verify", &format!("{r}^{{commit}}")], env).output().ok()?;
     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
