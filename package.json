@@ -1,7 +1,7 @@
 {
   "name": "gitkrapao",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "scripts": {
     "dev": "node scripts/tauri.mjs dev",
     "build": "node scripts/tauri.mjs build",
