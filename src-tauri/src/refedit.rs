@@ -170,7 +170,8 @@ fn no_userinfo(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_string();
     };
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    // Only "/" ends it, as for git: a password may hold a raw "?" or "#".
+    let end = rest.find('/').unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
     // The last "@": a password may hold a raw "@" itself.
     let Some((user, host)) = authority.rsplit_once('@') else {
@@ -478,14 +479,17 @@ pub(crate) fn delete_tag_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
         return done(steps, &r, format!("Deleted tag {name} ({short}); kept on origin."), true, false);
     }
     // --no-signed: signing would run gpg.program, which the repo's config can name.
-    let pcx = SwitchCtx { limit: cx.limit.min(PUSH_LIMIT), ..*cx };
+    // LC_ALL=C: the "origin never had it" check below reads git's English text.
+    let env: Vec<(&str, &str)> = cx.env.iter().copied().chain([("LC_ALL", "C")]).collect();
+    let pcx = SwitchCtx { limit: cx.limit.min(PUSH_LIMIT), env: &env, ..*cx };
     let p = match steps.run(repo, &["push", "--no-signed", "--no-recurse-submodules", "origin", "--delete", &full], &pcx) {
         Ok(p) => p,
         Err(e) => return done(steps, &r, format!("Deleted tag {name} ({short}) here; deleting it on origin failed: {e}"), false, false),
     };
     // Origin never had it: newer git warns and succeeds, older servers refuse.
+    // Only with one push URL: with several, another one may have had it.
     let err = String::from_utf8_lossy(&p.stderr).to_ascii_lowercase();
-    if !p.timed_out && (err.contains("deleting a non-existent ref") || err.contains("remote ref does not exist")) {
+    if urls.len() == 1 && !p.timed_out && (err.contains("deleting a non-existent ref") || err.contains("remote ref does not exist")) {
         return done(steps, &p, format!("Deleted tag {name} ({short}); origin had no tag {name}."), true, false);
     }
     if succeeded(&p) {
@@ -556,7 +560,13 @@ pub(crate) fn restore_in(top: &str, token: u64, o: &OpCtx) -> GitResult {
     let restored = format!("Restored {noun} {} at {}.", d.name, d.short);
     // The upstream and the branch's other settings, unless something set
     // them again meanwhile.
-    if d.kind == RefKind::Branch && !d.config.is_empty() && branch_config(repo, &d.name, cx.env).is_ok_and(|c| c.is_empty()) {
+    if d.kind == RefKind::Branch && !d.config.is_empty() {
+        match branch_config(repo, &d.name, cx.env) {
+            Ok(now) if !now.is_empty() => return steps.result(Some(&r), restored, false),
+            Ok(_) => {}
+            // Unread is not "set meanwhile": say the upstream is missing.
+            Err(e) => return GitResult { ok: false, ..steps.result(Some(&r), format!("{restored} Its settings (upstream) were not restored: {e}"), false) },
+        }
         for (key, value) in &d.config {
             // A key written without "=" is a boolean true.
             let value = value.as_deref().unwrap_or("true");
@@ -1108,6 +1118,8 @@ mod tests {
             ("http://me:p@ss@host/r", "http://host/r"),
             ("https://me:pw@host", "https://host"),
             ("https://me:pw@host?x=1", "https://host?x=1"),
+            ("https://me:pa#ss@host/r", "https://host/r"),
+            ("https://me:p?w@host/r", "https://host/r"),
             ("https://host/a@b", "https://host/a@b"),
             ("ssh://git@host/r.git", "ssh://git@host/r.git"),
             ("ssh://u:secret@host:22/r", "ssh://host:22/r"),
@@ -1135,6 +1147,29 @@ mod tests {
         assert!(!text.contains("SECRETPAT") && !text.contains("me:"), "{text}");
         assert!(text.contains(&format!("  {bare}\n  https://example.invalid/r.git\n")), "{text}");
         assert!(text.contains("Origin is a folder"), "one folder among the URLs is enough: {text}");
+    }
+
+    // Two push URLs, only one with the tag: deleted there, so not "origin had
+    // no tag". The push runs in English (LC_ALL=C), whose text that check reads.
+    #[test]
+    fn two_push_urls_one_with_the_tag() {
+        let f = Fixture::new("refedit-tag-two-urls");
+        let a = f.bare_origin();
+        let b = f.dir.join("second.git");
+        f.git(&["init", "-q", "--bare", &b.to_string_lossy()]);
+        f.git(&["tag", "v1"]);
+        f.git(&["push", "-q", "origin", "v1"]);
+        let (a_url, b_url) = (a.to_string_lossy().replace('\\', "/"), b.to_string_lossy().replace('\\', "/"));
+        f.git(&["remote", "set-url", "--add", "--push", "origin", &a_url]);
+        f.git(&["remote", "set-url", "--add", "--push", "origin", &b_url]);
+        let lc = f.marker("lc-all");
+        f.hook("pre-push", &format!("#!/bin/sh\necho \"$LC_ALL\" > '{lc}'\n"));
+        let r = f.del_tag(&UndoStore::default(), "v1");
+        assert!(r.ok, "{}: {}", r.summary, r.stderr);
+        assert!(r.summary.ends_with("here and on origin."), "{}", r.summary);
+        assert!(r.deleted.as_ref().is_some_and(|d| d.on_origin));
+        assert_eq!(f.git_in(&a, &["tag", "-l"]), "");
+        assert_eq!(std::fs::read_to_string(&lc).unwrap().trim(), "C");
     }
 
     // A folder (path, share, file://), also one an insteadOf rewrite leads
