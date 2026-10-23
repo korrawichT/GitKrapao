@@ -248,6 +248,9 @@ run(async () => {
   await click($('#tabMore'), 50);
   const items = $$('#tabList .menu-item');
   ok(!$('#tabList').hidden && items.length === 2 && items[1].textContent.includes('b') && items[1].textContent.includes(B), 'tab list shows name and path', $('#tabList').textContent);
+  const lr = $('#tabList').getBoundingClientRect(), mr = $('#tabMore').getBoundingClientRect();
+  ok(lr.left >= 0 && lr.right <= document.documentElement.clientWidth && Math.abs(lr.right - mr.right) <= 1,
+    'tab list stays inside the window, right edge under the ▾ button', JSON.stringify([lr.left, lr.right, mr.right, document.documentElement.clientWidth]));
   await click(items[1], 300);
   ok($('#tabList').hidden && active() === 1 && rows().includes('b-two'), 'tab list activates the tab', state());
 

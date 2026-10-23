@@ -96,7 +96,8 @@ button{font:inherit;color:inherit}
 .tabs-btn svg{display:block}
 .tabs-spacer{flex:1;min-width:8px}
 .tabs-more-wrap{position:relative;flex:none}
-.tabs-menu{top:calc(100% + 4px);left:auto;right:0;max-height:min(420px,70vh);overflow:auto}
+/* .menu.tabs-menu: .menu (left:-7px) comes later in this file and would push it off the window's right edge */
+.menu.tabs-menu{top:calc(100% + 4px);left:auto;right:0;max-height:min(420px,70vh);overflow:auto}
 .tabs-menu .menu-item.on .n{font-weight:600}
 
 /* main */
