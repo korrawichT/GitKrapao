@@ -39,6 +39,8 @@ fn parse_target(target: &str, remotes: &[String]) -> Option<Target> {
         .map(|r| Target::Remote { remote: r.clone(), name: rest[r.len() + 1..].to_string() })
 }
 
+/// Copy, so a step can run with another limit (`SwitchCtx { limit, ..*cx }`).
+#[derive(Clone, Copy)]
 pub(crate) struct SwitchCtx<'a> {
     /// Asks whether to stash and switch; true = stash.
     pub ask: &'a dyn Fn(&str) -> bool,
@@ -92,6 +94,7 @@ impl Steps {
             stdout: join(self.stdout),
             stderr: join(self.stderr),
             summary,
+            deleted: None,
         }
     }
 }
@@ -329,8 +332,8 @@ pub(crate) async fn switch_branch(app: tauri::AppHandle, path: String, target: S
         let state = app.state::<AppState>();
         let ask_title = format!("Switch branch — {}: uncommitted changes", info.name);
         let trust_title = format!("Switch branch — {}: trust this repository?", info.name);
-        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", text);
-        let trust = |text: &str| ask_native(&app, &trust_title, "Switch", text);
+        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", "Cancel", text);
+        let trust = |text: &str| ask_native(&app, &trust_title, "Switch", "Cancel", text);
         switch_in(&info.path, &target, &SwitchCtx {
             ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&*pid),
         })

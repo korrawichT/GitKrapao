@@ -7,6 +7,7 @@
 //! - refspecs that would write outside refs/remotes/ are refused;
 //! - 90 s limit, then the whole process tree is killed.
 
+use super::refedit::DeletedRef;
 use super::*;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -30,13 +31,14 @@ const FETCH_ARGS: [&str; 6] = ["fetch", "--all", "--prune", "--no-prune-tags", "
 /// the repo's own (local/worktree) entries. One list for both operations,
 /// so trusting a repo once covers both.
 const TRUST_CONFIG_RE: &str = r"^(core\.(sshcommand|gitproxy|askpass|hookspath|alternaterefscommand|fsmonitor)|credential\..*helper|remote\..*\.(uploadpack|receivepack|vcs|fetch|mirror)|protocol\.(.+\.)?allow|url\..*\.insteadof|hook\..*|filter\..*\.(smudge|clean|process))$";
-/// Hooks fetch (reference-transaction) or a checkout, fast-forward or stash runs.
-const TRUST_HOOKS: [&str; 5] = ["reference-transaction", "post-checkout", "post-merge", "post-index-change", "pre-auto-gc"];
+/// Hooks fetch (reference-transaction), a checkout, fast-forward or stash, or
+/// the push that deletes a tag on origin (pre-push) runs.
+const TRUST_HOOKS: [&str; 6] = ["reference-transaction", "post-checkout", "post-merge", "post-index-change", "pre-auto-gc", "pre-push"];
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
-/// Outcome of a fetch or a branch switch, shown in the Output drawer.
+/// Outcome of an operation (fetch, switch, create, rename, delete, undo), shown in the Output drawer.
 pub(crate) struct GitResult {
     pub ok: bool,
     pub timed_out: bool,
@@ -51,6 +53,10 @@ pub(crate) struct GitResult {
     pub stderr: String,
     /// One line for the banner; stderr keeps git's own words.
     pub summary: String,
+    /// Set when a branch or tag was deleted here: the UI offers Undo with its token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub deleted: Option<DeletedRef>,
 }
 
 impl GitResult {
@@ -66,6 +72,7 @@ impl GitResult {
             stdout: String::new(),
             stderr: String::new(),
             summary: summary.into(),
+            deleted: None,
         }
     }
 
@@ -619,19 +626,20 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> GitResult
         stdout: String::from_utf8_lossy(&r.stdout).into_owned(),
         summary: fetch_summary(ok, r.timed_out, exit_code, &stderr, ssh),
         stderr,
+        deleted: None,
     }
 }
 
 /// Native, modal, and not reachable from the webview (the dialog plugin has
 /// no permission in capabilities/default.json), so page script cannot answer it.
-/// True for `ok`; Cancel or closing the dialog is false.
-pub(crate) fn ask_native(app: &tauri::AppHandle, title: &str, ok: &str, text: &str) -> bool {
+/// True for `ok`; `cancel` (e.g. "Cancel", "Keep on origin") or closing the dialog is false.
+pub(crate) fn ask_native(app: &tauri::AppHandle, title: &str, ok: &str, cancel: &str, text: &str) -> bool {
     let mut d = app
         .dialog()
         .message(text)
         .title(title)
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(ok.into(), "Cancel".into()));
+        .buttons(MessageDialogButtons::OkCancelCustom(ok.into(), cancel.into()));
     if let Some(w) = app.get_webview_window("main") {
         d = d.parent(&w);
     }
@@ -653,7 +661,7 @@ pub(crate) async fn fetch(app: tauri::AppHandle, path: String, state: State<'_, 
         let _lock = lock;
         let state = app.state::<AppState>();
         let title = format!("Fetch — {}: trust this repository?", info.name);
-        let ask = |text: &str| ask_native(&app, &title, "Fetch", text);
+        let ask = |text: &str| ask_native(&app, &title, "Fetch", "Cancel", text);
         fetch_in(
             &info.path,
             &dirs.common_dir,
@@ -878,6 +886,41 @@ mod tests {
         std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
         f.fetch(false, &asked);
         assert_eq!(Fixture::asks(&asked), n + 2, "a changed hook asks again");
+    }
+
+    // pre-push joined TRUST_HOOKS (deleting a tag on origin pushes). The hash
+    // is made from the hooks that exist, so a repo without pre-push keeps the
+    // hash it had, and with it its approval; one with pre-push is asked once.
+    #[test]
+    fn pre_push_is_trusted_without_changing_other_hashes() {
+        let f = Fixture::new("prepush");
+        let dir = PathBuf::from(f.git(&f.local(), &["rev-parse", "--path-format=absolute", "--git-path", "hooks"]));
+        let line = |name: &str| {
+            let p = dir.join(name);
+            format!("hook	{}	{:x}", p.to_string_lossy(), Sha256::digest(std::fs::read(&p).unwrap()))
+        };
+        std::fs::write(dir.join("reference-transaction"), "#!/bin/sh
+exit 0
+").unwrap();
+        let env = f.env();
+        let hash = || assess(&f.local(), &read_trust_config(&f.local(), &env).unwrap(), &env).hash;
+        assert_eq!(hash(), Some(trust_hash(&[line("reference-transaction")])), "the same hash as before pre-push was listed");
+
+        let asked = RefCell::new(vec![]);
+        assert!(f.fetch(true, &asked).ok);
+        let n = Fixture::asks(&asked);
+        assert!(f.fetch(true, &asked).ok);
+        assert_eq!(Fixture::asks(&asked), n, "approved once");
+
+        std::fs::write(dir.join("pre-push"), "#!/bin/sh
+exit 0
+").unwrap();
+        assert_eq!(hash(), Some(trust_hash(&[line("reference-transaction"), line("pre-push")])));
+        assert!(f.fetch(true, &asked).ok);
+        assert_eq!(Fixture::asks(&asked), n + 1, "a pre-push hook asks once");
+        assert!(asked.borrow()[n].contains("hook pre-push"), "{}", asked.borrow()[n]);
+        assert!(f.fetch(true, &asked).ok);
+        assert_eq!(Fixture::asks(&asked), n + 1);
     }
 
     // Anything that would let --prune delete or overwrite local refs is

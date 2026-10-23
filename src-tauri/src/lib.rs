@@ -13,7 +13,10 @@ use tauri_plugin_dialog::DialogExt;
 
 mod create;
 mod fetch;
+mod refedit;
 mod switch;
+#[cfg(test)]
+mod testutil;
 
 /// Field separator (0x1f) and record separator (0x1e) never appear in normal
 /// commit metadata, so subjects containing "|" or quotes parse safely.
@@ -198,8 +201,10 @@ struct AppState {
     stream: Mutex<Option<Stream>>,
     next_gen: AtomicU64,
     dirs: Mutex<HashMap<String, GitDirs>>,
-    /// Operations (fetch, switch, create) running, by lock key (GitDirs::lock_key): one per repo.
+    /// Operations (fetch, switch, create, rename, delete, undo) running, by lock key (GitDirs::lock_key): one per repo.
     busy_repos: fetch::OpRegistry,
+    /// The last deleted branch or tag per repo, for Undo (the page holds only its token).
+    undo: refedit::UndoStore,
     /// Serializes reads and writes of the trust file.
     trust_lock: Mutex<()>,
     /// The "operations still running" close dialog is open (one at a time).
@@ -1501,7 +1506,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, stop_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch, create::create_branch, create::create_tag])
+        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, stop_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch, create::create_branch, create::create_tag, refedit::rename_branch, refedit::delete_branch, refedit::delete_tag, refedit::restore_ref])
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {
@@ -1518,7 +1523,7 @@ pub fn run() {
                             let app = app.clone();
                             // ask_native blocks until answered: never on the event loop.
                             std::thread::spawn(move || {
-                                let close = fetch::ask_native(&app, "GitKrapao: operations still running", "Close anyway", &text);
+                                let close = fetch::ask_native(&app, "GitKrapao: operations still running", "Close anyway", "Cancel", &text);
                                 let state = app.state::<AppState>();
                                 state.closing_prompt.store(false, Ordering::SeqCst);
                                 if close {

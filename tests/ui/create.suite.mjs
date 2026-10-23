@@ -141,7 +141,7 @@ run(async () => {
   // A tag from a graph label's menu: "Switch to" stays first, Create comes last.
   const pill = [...document.querySelectorAll('#body .pill')].find(p => p.textContent.includes('feat'));
   ctx(pill); await wait(30);
-  ok(labels() === 'Switch to feat,Hide,Copy branch name,Create branch here…,Create tag here…', 'label menu', labels());
+  ok(labels() === 'Switch to feat,Hide,Copy branch name,Rename branch…,Delete branch…,Create branch here…,Create tag here…', 'label menu', labels());
   pick('Create tag here…'); await wait(30);
   ok(dlg.open && $('#cTitle').textContent === 'Create tag' && $('#cHash').textContent === 'ccccccc', 'tag dialog for the label commit');
   ok($('#cSwitchRow').hidden && !$('#cMsgRow').hidden && $('#cMsg').value === '', 'message box, no switch box');

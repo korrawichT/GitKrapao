@@ -27,4 +27,17 @@ run(async () => {
   ok(nameClash('team', 'branch', names) === 'Clashes with the branch team/a', 'over an existing folder', nameClash('team', 'branch', names));
   ok(['feature', 'team-b', 'topic', 'main2'].every(n => nameClash(n, 'branch', names) === ''), 'no clash');
   ok(nameClash('V1', 'tag', ['v1']) === 'A tag named v1 already exists.', 'tags too', nameClash('V1', 'tag', ['v1']));
+
+  // Rename: the branch's own name (self) is not a clash, so feat can become
+  // feat/x or stay feat; a change of letter case only is refused (one file on
+  // Windows). Every other name still clashes as before.
+  const CASE = 'Only the letter case changes; Windows stores both names as one file.';
+  ok(nameClash('feat', 'branch', names, 'feat') === '', 'self is no clash', nameClash('feat', 'branch', names, 'feat'));
+  ok(nameClash('feat/x', 'branch', names, 'feat') === '', 'feat -> feat/x: no clash with itself', nameClash('feat/x', 'branch', names, 'feat'));
+  ok(nameClash('Feat', 'branch', names, 'feat') === CASE, 'case-only rename refused', nameClash('Feat', 'branch', names, 'feat'));
+  ok(nameClash('FEAT', 'branch', names, 'feat') === CASE, 'case-only rename refused (all caps)');
+  ok(nameClash('Main', 'branch', names, 'feat') === 'A branch named main already exists.', 'other names still clash with self given');
+  ok(nameClash('team', 'branch', names, 'feat') === 'Clashes with the branch team/a', 'folder clash with self given');
+  ok(nameClash('team/a/b', 'branch', names, 'team/a') === '', 'team/a -> team/a/b: no clash with itself');
+  ok(nameClash('topic', 'branch', names, 'feat') === '', 'free name');
 });`;
