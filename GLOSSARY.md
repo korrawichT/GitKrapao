@@ -13,7 +13,7 @@ A branch that lives on the server. You can see it only through its remote-tracki
 _Avoid_: Origin branch, upstream branch
 
 **Remote-tracking branch**:
-Your copy of a remote branch as of the last fetch, such as `origin/x`. It is shown as a label and is never renamed or deleted by the app.
+Your copy of a remote branch as of the last fetch, such as `origin/x`. It is shown as a label. Rename and Delete do not touch it; Fetch updates it and prunes it when the branch is gone on the remote.
 _Avoid_: Remote branch, remote ref
 
 **Unreachable commits**:
