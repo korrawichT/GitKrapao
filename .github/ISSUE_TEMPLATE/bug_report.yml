@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in GitKrapao does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A security problem goes through **Security → Report a vulnerability** instead of an issue.
+        Please do not paste passwords, tokens or code you are not allowed to share.
+  - type: input
+    id: version
+    attributes:
+      label: GitKrapao version
+      description: Shown in Windows Settings → Apps → Installed apps.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows and Git versions
+      description: "`winver` and `git --version`."
+      placeholder: "Windows 11 24H2, git version 2.47.0.windows.1"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a repository with ...
+        2. Right-click ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: A screenshot helps for anything visual.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output drawer
+      description: For a fetch, switch, create, rename, delete or undo, copy the entry from the Output drawer at the bottom of the window (command, time and what git printed).
+      render: text
