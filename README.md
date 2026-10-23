@@ -179,3 +179,7 @@ Never rename the keys or the identifier, or users lose their saved settings.
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome: see [CONTRIBUTING.md](.github/CONTRIBUTING.md) and the [Code of Conduct](.github/CODE_OF_CONDUCT.md). Report security problems privately, as described in [SECURITY.md](.github/SECURITY.md).
+
+## License
+
+[MIT](LICENSE). Contributions are accepted under the same license.
