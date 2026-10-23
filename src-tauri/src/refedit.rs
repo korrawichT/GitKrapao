@@ -79,6 +79,12 @@ impl UndoStore {
             None
         }
     }
+
+    /// Gives an entry back after a restore that changed nothing, unless a
+    /// newer delete took the repo's slot meanwhile.
+    fn put_back(&self, key: &str, token: u64, d: Deleted) {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).entry(key.to_string()).or_insert((token, d));
+    }
 }
 
 /// The object `ns` + `name` points to, for exactly that name (byte for
@@ -93,6 +99,32 @@ fn exact(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Opti
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
         .find_map(|l| l.split_once(' ').filter(|(_, r)| *r == want).map(|(o, _)| o.to_string())))
+}
+
+/// Another ref under `ns` whose name equals `name` without case (any letter,
+/// as in `taken`) but not byte for byte. On Windows git reads and writes
+/// such a pair as one file: `git branch -D feat` next to a loose "FEAT"
+/// deletes FEAT's commit as well, and `-m` renames the wrong tip.
+fn case_sibling(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Option<String>, String> {
+    let out = git_env(repo, &["for-each-ref", "--format=%(refname)", ns], env).output().map_err(spawn_error)?;
+    if !out.status.success() {
+        return Err(git_error(&String::from_utf8_lossy(&out.stderr), out.status.code(), "git for-each-ref"));
+    }
+    let want = format!("{ns}{name}");
+    let lower = want.to_lowercase();
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find(|r| *r != want && r.to_lowercase() == lower)
+        .map(|r| r[ns.len()..].to_string()))
+}
+
+/// The refusal text for a case sibling of branch `name`.
+fn sibling_text(name: &str, other: &str, nothing: &str) -> String {
+    format!(
+        "Another branch, {}, differs from {} only in letter case; Windows stores both as one file, so {nothing}. Rename or delete one of them in a terminal first.",
+        sanitize(other, 120),
+        sanitize(name, 120)
+    )
 }
 
 /// More stashes than this would not fit the Windows command line: no count.
@@ -185,6 +217,11 @@ pub(crate) fn rename_in(top: &str, from: &str, to: &str, o: &OpCtx) -> GitResult
         Ok(None) => return refused(format!("Branch {f} does not exist."), false),
         Err(e) => return refused(format!("Could not read the branches, so nothing was renamed: {e}"), false),
     }
+    match case_sibling(repo, HEADS, from, cx.env) {
+        Ok(None) => {}
+        Ok(Some(other)) => return refused(sibling_text(from, &other, "nothing was renamed"), false),
+        Err(e) => return refused(format!("Could not read the branches, so nothing was renamed: {e}"), false),
+    }
     if to == from {
         return refused(format!("The branch is already called {t}."), false);
     }
@@ -227,6 +264,11 @@ pub(crate) fn delete_branch_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
         Ok(None) => return refused(format!("Branch {shown} does not exist."), false),
         Err(e) => return refused(format!("Could not read the branches, so nothing was deleted: {e}"), false),
     };
+    match case_sibling(repo, HEADS, name, cx.env) {
+        Ok(None) => {}
+        Ok(Some(other)) => return refused(sibling_text(name, &other, "nothing was deleted"), false),
+        Err(e) => return refused(format!("Could not read the branches, so nothing was deleted: {e}"), false),
+    }
     match git_env(repo, &["symbolic-ref", "-q", "HEAD"], cx.env).output() {
         Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == full => {
             return refused("The checked-out branch cannot be deleted.".into(), false);
@@ -359,10 +401,19 @@ pub(crate) fn restore_in(top: &str, token: u64, o: &OpCtx) -> GitResult {
     };
     let shown = sanitize(&d.name, 120);
     let full = format!("{ns}{}", d.name);
-    let refused = |summary: String, cancelled: bool| GitResult::not_run(format!("git update-ref ({ns}{shown})"), summary, cancelled);
+    // Refused before anything was written: the entry goes back, so Undo can
+    // be pressed again (after a cancelled trust question, or once the name
+    // is free).
+    let refused = |summary: String, cancelled: bool| {
+        o.undo.put_back(o.key, token, d.clone());
+        GitResult::not_run(format!("git update-ref ({ns}{shown})"), summary, cancelled)
+    };
     match taken(repo, ns, &d.name, cx.env) {
         Ok(None) => {}
-        Ok(Some(other)) => return refused(format!("A {noun} named {other} already exists, so {shown} was not restored."), false),
+        Ok(Some(other)) => {
+            let sha = &d.sha;
+            return refused(format!("A {noun} named {other} already exists, so {shown} ({sha}) was not restored."), false);
+        }
         Err(e) => return refused(format!("Could not read the existing {noun}s, so nothing was restored: {e}"), false),
     }
     if !git_env(repo, &["cat-file", "-e", &d.sha], cx.env).output().is_ok_and(|out| out.status.success()) {
@@ -927,7 +978,9 @@ mod tests {
         assert_eq!(f.git(&["for-each-ref", "--format=%(contents)", "refs/tags/v2"]), "release notes");
     }
 
-    // A name taken meanwhile (in any case) is not overwritten; nothing changes.
+    // A name taken meanwhile (in any case) is not overwritten; nothing
+    // changes, the text gives the full hash, and the same token works once
+    // the name is free again.
     #[test]
     fn restore_never_overwrites_a_taken_name() {
         let f = Fixture::new("refedit-restore-taken");
@@ -939,14 +992,65 @@ mod tests {
         f.git(&["branch", "Feat", &head]);
         let r = f.restore(&undo, KEY, b);
         assert!(!r.ok && r.exit_code.is_none(), "{}", r.summary);
-        assert_eq!(r.summary, "A branch named Feat already exists, so feat was not restored.");
+        assert_eq!(r.summary, format!("A branch named Feat already exists, so feat ({one}) was not restored."));
         assert_eq!(f.sha("refs/heads/Feat"), head);
+        f.git(&["branch", "-D", "Feat"]);
+        let r = f.restore(&undo, KEY, b);
+        assert!(r.ok, "the token survived the refusal: {}", r.summary);
+        assert_eq!(f.sha("refs/heads/feat"), one);
 
         let t = f.del_tag(&undo, "v1").deleted.unwrap().token;
         f.git(&["tag", "v1", &head]);
         let r = f.restore(&undo, KEY, t);
-        assert_eq!(r.summary, "A tag named v1 already exists, so v1 was not restored.");
+        assert_eq!(r.summary, format!("A tag named v1 already exists, so v1 ({one}) was not restored."));
         assert_eq!(f.sha("refs/tags/v1"), head);
+    }
+
+    // Trust cancelled: nothing changed, so Undo can be pressed again.
+    #[test]
+    fn a_cancelled_restore_keeps_the_token() {
+        let f = Fixture::new("refedit-restore-cancel");
+        let one = f.sha("HEAD~1");
+        f.git(&["branch", "feat", &one]);
+        let undo = UndoStore::default();
+        let t = f.del_branch(&undo, "feat").deleted.unwrap().token;
+        f.hook("reference-transaction", "#!/bin/sh
+exit 0
+");
+        f.trust.set(false);
+        let r = f.restore(&undo, KEY, t);
+        assert!(!r.ok && r.cancelled && r.summary == "Undo delete cancelled: the repository was not trusted.", "{}", r.summary);
+        assert_eq!(f.refs(HEADS), "refs/heads/main");
+        f.trust.set(true);
+        let r = f.restore(&undo, KEY, t);
+        assert!(r.ok, "{}: {}", r.summary, r.stderr);
+        assert_eq!(f.sha("refs/heads/feat"), one);
+        assert!(!f.restore(&undo, KEY, t).ok, "a restore that wrote the ref uses the token up");
+    }
+
+    // A packed "feat" and a loose "FEAT" are one file on Windows: git would
+    // delete or rename the wrong tip (and drop FEAT's commits uncounted), so
+    // both operations are refused before any question; both refs stay.
+    #[test]
+    fn refuses_a_branch_with_a_case_sibling() {
+        let f = Fixture::new("refedit-case-sibling");
+        let (one, head) = (f.sha("HEAD~1"), f.sha("HEAD"));
+        f.git(&["branch", "feat", &one]);
+        f.git(&["pack-refs", "--all"]);
+        f.git(&["update-ref", "refs/heads/FEAT", &head]);
+        let refs = f.git(&["for-each-ref", "--format=%(objectname) %(refname)", HEADS]);
+        assert!(refs.contains(&format!("{one} refs/heads/feat")) && refs.contains(&format!("{head} refs/heads/FEAT")), "{refs}");
+        let undo = UndoStore::default();
+        let r = f.del_branch(&undo, "feat");
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none() && r.deleted.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "Another branch, FEAT, differs from feat only in letter case; Windows stores both as one file, so nothing was deleted. Rename or delete one of them in a terminal first.");
+        let r = f.del_branch(&undo, "FEAT");
+        assert!(!r.ok && r.summary.starts_with("Another branch, feat, differs from FEAT"), "{}", r.summary);
+        let r = f.rename("feat", "x");
+        assert!(!r.ok && r.exit_code.is_none(), "{}", r.summary);
+        assert!(r.summary.starts_with("Another branch, FEAT, differs from feat only in letter case;") && r.summary.contains("nothing was renamed"), "{}", r.summary);
+        assert!(f.confirms.borrow().is_empty() && f.trusted.borrow().is_empty());
+        assert_eq!(f.git(&["for-each-ref", "--format=%(objectname) %(refname)", HEADS]), refs, "both refs intact");
     }
 
     // A token works only in the repo that made it, only for the last delete
