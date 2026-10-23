@@ -1518,7 +1518,7 @@ pub fn run() {
                             let app = app.clone();
                             // ask_native blocks until answered: never on the event loop.
                             std::thread::spawn(move || {
-                                let close = fetch::ask_native(&app, "GitKrapao: operations still running", "Close anyway", &text);
+                                let close = fetch::ask_native(&app, "GitKrapao: operations still running", "Close anyway", "Cancel", &text);
                                 let state = app.state::<AppState>();
                                 state.closing_prompt.store(false, Ordering::SeqCst);
                                 if close {

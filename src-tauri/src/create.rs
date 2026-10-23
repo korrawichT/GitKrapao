@@ -158,8 +158,8 @@ async fn run_create(
         let state = app.state::<AppState>();
         let ask_title = format!("{op} — {}: uncommitted changes", info.name);
         let trust_title = format!("{op} — {}: trust this repository?", info.name);
-        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", text);
-        let trust = |text: &str| ask_native(&app, &trust_title, "Create", text);
+        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", "Cancel", text);
+        let trust = |text: &str| ask_native(&app, &trust_title, "Create", "Cancel", text);
         create(&info.path, &SwitchCtx {
             ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&*pid),
         })
