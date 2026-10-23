@@ -1,7 +1,7 @@
 // Builds a fake but realistic Git repository for developing GitKrapao without
 // touching real work repos: main/develop/feature/release/hotfix branches,
 // pull-request merges, annotated tags, remote-tracking refs, several authors,
-// Thai and English messages, and adds, edits, deletes, renames and a binary.
+// English messages, and adds, edits, deletes, renames and a binary.
 //
 // usage: node scripts/mock-repo.mjs [outDir]    (default: .mock/demo-repo)
 // The output is rebuilt on every run; the same input always gives the same history.
@@ -35,7 +35,7 @@ const tick = () => (clock += int(20, 9 * 60) * 60);
 const PEOPLE = [
   ['Nattaya Kongsri', 'nattaya@example.com'], ['Somchai Prasert', 'somchai@example.com'],
   ['Alex Rivera', 'alex@example.com'], ['Pim Suwan', 'pim@example.com'],
-  ['Jordan Lee', 'jordan@example.com'], ['กมล ใจดี', 'kamol@example.com'],
+  ['Jordan Lee', 'jordan@example.com'], ['Kamol Jaidee', 'kamol@example.com'],
 ];
 
 /* ---------- fast-import stream ---------- */
@@ -93,14 +93,14 @@ const ts = name => `export function ${name.replace(/\W/g, '_')}() {\n  return '$
 /* ---------- history ---------- */
 const lead = PEOPLE[1];
 commitTo('main', 'Initial commit', [
-  { op: 'M', path: 'README.md', content: '# Acme Webapp\n\nตัวอย่างโปรเจกต์สำหรับทดสอบ GitKrapao\n' },
+  { op: 'M', path: 'README.md', content: '# Acme Webapp\n\nSample project for trying out GitKrapao\n' },
   { op: 'M', path: 'package.json', content: '{\n  "name": "acme-webapp",\n  "version": "0.1.0"\n}\n' },
   { op: 'M', path: '.gitignore', content: 'node_modules/\ndist/\n' },
   { op: 'M', path: 'src/index.ts', content: ts('main') },
 ], { who: lead });
 commitTo('main', 'Add project scaffolding and README', [edit(branches.get('main').files, 'README.md', '\n## Getting started\n\n    pnpm install\n'), { op: 'M', path: 'src/app.ts', content: ts('app') }], { who: lead });
 commitTo('main', 'Set up CI pipeline', [{ op: 'M', path: '.github/workflows/ci.yml', content: 'name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n' }], { who: PEOPLE[4] });
-commitTo('main', 'เพิ่มโลโก้และไอคอนของแอป', [{ op: 'M', path: 'assets/logo.png', content: png(400) }], { who: PEOPLE[3] });
+commitTo('main', 'Add app logo and icons', [{ op: 'M', path: 'assets/logo.png', content: png(400) }], { who: PEOPLE[3] });
 tagAt('v0.1.0', branches.get('main').mark, 'First tagged build');
 branchOff('develop', 'main');
 
@@ -108,12 +108,12 @@ const FEATURES = ['auth', 'dashboard', 'notifications', 'dark-mode', 'export-csv
 const WORK = [
   x => `Add ${x} component`, x => `Wire up ${x} API`, x => `Fix ${x} edge case when the list is empty`,
   x => `Refactor ${x} into hooks`, x => `Add tests for ${x}`, x => `Polish ${x} styles`,
-  x => `ปรับปรุง ${x} ให้โหลดเร็วขึ้น`, x => `แก้ไขบั๊ก ${x} ตอนไม่มีข้อมูล`, x => `เพิ่มข้อความภาษาไทยใน ${x}`,
+  x => `Speed up ${x} loading`, x => `Fix ${x} bug when there is no data`, x => `Add Thai translations to ${x}`,
 ];
 const BODIES = [
   '', '', '',
   'The old version re-rendered on every keystroke.\n\n- debounce input by 150 ms\n- keep the cursor position',
-  'รายละเอียด:\n- ตรวจสอบค่าว่างก่อนเรียก API\n- เพิ่ม test กรณีผู้ใช้ยังไม่ล็อกอิน',
+  'Details:\n- check for empty values before calling the API\n- add a test for a user who is not signed in',
   'Follow-up to the review comments.\n\nCo-authored-by: Pim Suwan <pim@example.com>',
 ];
 let pr = 10, minor = 1;
@@ -124,7 +124,7 @@ function featureCommit(br, x){
   if (!own.length || roll < 0.3) changes.push({ op: 'M', path: `src/${x}/${pick(['index', 'view', 'store', 'api'])}.ts`, content: ts(x + int(1, 99)) });
   else changes.push(edit(files, pick(own), `// ${x} ${int(1, 999)}`));
   if (rand() < 0.35) changes.push(edit(files, files.has('src/main-app.ts') ? 'src/main-app.ts' : 'src/app.ts', `import './${x}';`));
-  if (rand() < 0.15) changes.push({ op: 'M', path: `docs/${x}.md`, content: `# ${x}\n\nหมายเหตุสำหรับทีม\n` });
+  if (rand() < 0.15) changes.push({ op: 'M', path: `docs/${x}.md`, content: `# ${x}\n\nNotes for the team\n` });
   const subject = pick(WORK)(x), body = pick(BODIES);
   commitTo(br, body ? `${subject}\n\n${body}` : subject, changes);
 }
@@ -138,7 +138,7 @@ for (let sprint = 0; sprint < 7; sprint++) {
     active.push({ br, x, left: int(2, 6) });
   }
   while (active.some(f => f.left > 0)) {
-    if (rand() < 0.15) commitTo('develop', pick(['Update dependencies', 'Fix flaky date formatting test', 'อัปเดต CHANGELOG', 'Tidy lint warnings']),
+    if (rand() < 0.15) commitTo('develop', pick(['Update dependencies', 'Fix flaky date formatting test', 'Update CHANGELOG', 'Tidy lint warnings']),
       [edit(branches.get('develop').files, 'package.json', '')]);
     const f = pick(active.filter(a => a.left > 0));
     featureCommit(f.br, f.x); f.left--;
@@ -159,7 +159,7 @@ for (let sprint = 0; sprint < 7; sprint++) {
   if (sprint === 1) {   // a rename and a delete land on develop
     const files = branches.get('develop').files;
     commitTo('develop', 'Rename app.ts to main-app.ts', [{ op: 'R', from: 'src/app.ts', to: 'src/main-app.ts' }]);
-    if (files.has('.github/workflows/ci.yml')) commitTo('develop', 'ลบ workflow เก่าที่ไม่ได้ใช้แล้ว', [{ op: 'D', path: '.github/workflows/ci.yml' }]);
+    if (files.has('.github/workflows/ci.yml')) commitTo('develop', 'Remove the old unused workflow', [{ op: 'D', path: '.github/workflows/ci.yml' }]);
   }
   if (sprint === 3 || sprint === 5) {   // hotfix on main
     const hf = `hotfix/login-crash-${sprint}`;
@@ -169,7 +169,7 @@ for (let sprint = 0; sprint < 7; sprint++) {
     mergeInto('develop', hf, `Merge branch '${hf}' into develop`, lead);
     drop(hf);
   }
-  if (sprint === 4) commitTo('develop', 'อัปเดตโลโก้ใหม่', [{ op: 'M', path: 'assets/logo.png', content: png(520) }], { who: PEOPLE[3] });
+  if (sprint === 4) commitTo('develop', 'Update the logo', [{ op: 'M', path: 'assets/logo.png', content: png(520) }], { who: PEOPLE[3] });
 }
 
 // Work in progress at the end: open features, local branches ahead of origin.
@@ -182,7 +182,7 @@ for (const x of ['reports', 'mobile-nav']) {
 remote.main = branches.get('main').mark;
 remote.develop = branches.get('develop').mark;
 commitTo('develop', 'WIP: unread badge in nav bar', [edit(branches.get('develop').files, 'src/main-app.ts', '// badge')], { who: PEOPLE[0] });
-commitTo('develop', 'แก้ไขข้อความแจ้งเตือนให้ชัดเจนขึ้น', [edit(branches.get('develop').files, 'README.md', '- notifications')], { who: PEOPLE[5] });
+commitTo('develop', 'Make notification messages clearer', [edit(branches.get('develop').files, 'README.md', '- notifications')], { who: PEOPLE[5] });
 for (const [ref, mark] of Object.entries(remote)) remoteAt(ref, mark);
 
 /* ---------- write it ---------- */
@@ -197,17 +197,17 @@ for (const b of Object.keys(remote)) git(['branch', '-q', `--set-upstream-to=ori
 git(['reset', '-q', '--hard']);
 
 // Two stashes on develop: a plain WIP stash with an untracked file (-u), then a
-// newer one with a Thai message. Fixed identity and clock keep them identical
+// newer one with a message. Fixed identity and clock keep them identical
 // across runs.
 const stash = (when, edit, args) => {
   for (const [f, text] of edit) writeFileSync(path.join(out, f), text);
   const t = `${clock + when} +0700`;
-  execFileSync('git', ['-C', out, '-c', 'core.autocrlf=false', '-c', 'user.name=กมล ใจดี', '-c', 'user.email=kamol@example.com', 'stash', 'push', '-q', ...args], {
+  execFileSync('git', ['-C', out, '-c', 'core.autocrlf=false', '-c', 'user.name=Kamol Jaidee', '-c', 'user.email=kamol@example.com', 'stash', 'push', '-q', ...args], {
     env: { ...process.env, GIT_AUTHOR_DATE: t, GIT_COMMITTER_DATE: t }, stdio: ['ignore', 'ignore', 'inherit'],
   });
 };
-stash(3600, [['src/main-app.ts', '// draft: badge counter\n'], ['notes-ร่าง.md', 'โน้ตชั่วคราว\n']], ['-u']);
-stash(7200, [['README.md', '# acme-webapp\n\nลองปรับสี theme ใหม่\n']], ['-m', 'ลองปรับสี theme ใหม่']);
+stash(3600, [['src/main-app.ts', '// draft: badge counter\n'], ['notes-draft.md', 'Scratch notes\n']], ['-u']);
+stash(7200, [['README.md', '# acme-webapp\n\nTry a new theme color\n']], ['-m', 'Try a new theme color']);
 
 writeFileSync(MARKER, 'Made by scripts/mock-repo.mjs; safe to delete.\n');
 const count = git(['rev-list', '--count', '--branches', '--remotes', '--tags']).trim();
