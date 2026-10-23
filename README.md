@@ -15,7 +15,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
 
 - **History graph:** each branch gets its own lane and color, merges are drawn, and branches and tags are labeled. Pages load on demand and only the visible part is drawn, so large repositories stay smooth.
 - **Auto-refresh:** checks every 3 seconds. After a commit, fetch, checkout or rebase, only what changed is loaded.
-- **Repository tabs:** open several repositories as tabs, switch with `Ctrl Tab` or `Ctrl 1`–`9`, open one with `Ctrl T` and close with `Ctrl W`. Open tabs are restored on the next start. Only the active tab is loaded and refreshed. A fetch or switch in one tab leaves the other tabs free, up to 3 at a time.
+- **Repository tabs:** open several repositories as tabs, switch with `Ctrl Tab` or `Ctrl 1`–`9`, open one with `Ctrl T` and close with `Ctrl W`. Open tabs are restored on the next start. Only the active tab is loaded and refreshed. A fetch, switch or create in one tab leaves the other tabs free, up to 3 at a time.
 - **Left panel:**
   - every branch, split into LOCAL and REMOTE, grouped into folders by name, with ahead/behind counts
   - STASHES
@@ -64,7 +64,7 @@ To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microso
 | Search | `/`, then type; `Enter` jumps to the next match |
 | In the left panel | Arrow keys to move and open folders, `Enter` to go to a branch, `H` to hide, `S` to solo |
 | In the diff view | `J` / `K` (or `]` / `[`) for the next/previous file |
-| Close the diff or details | `Esc` |
+| Close the diff, details or the create dialog | `Esc` |
 
 On macOS use `⌘` instead of `Ctrl`, except for `Ctrl Tab` / `Ctrl Shift Tab`, which stay `Ctrl`.
 
@@ -162,4 +162,4 @@ Never rename the keys or the identifier, or users lose their saved settings.
 | `link: extra operand` | MSVC's `link.exe` was not found, so Git's `link` ran instead. Install the "Desktop development with C++" workload. |
 | PRs say "Sign in first" | Run `az login` in a terminal, then press Refresh. |
 | Fetch says "Authentication failed" or times out | The app never shows git's password prompt. For HTTPS, run `git fetch` once in a terminal so Git Credential Manager saves your sign-in. For SSH, start ssh-agent and add your key with `ssh-add`. Then fetch again. |
-| Switch asks to stash | Switching would overwrite uncommitted changes. Choose **Stash and switch** to keep them in a stash (shown under STASHES), or **Cancel** and commit them first. |
+| Switch (or Create branch with **Switch to the new branch**) asks to stash | Switching would overwrite uncommitted changes. Choose **Stash and switch** to keep them in a stash (shown under STASHES), or **Cancel** and commit them first. |
