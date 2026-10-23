@@ -30,7 +30,7 @@ Security problems go through private reporting instead, see [SECURITY.md](SECURI
 - Keep using pnpm.
 - TypeScript is `strict`: no `any` outside parse boundaries, no `@ts-ignore`.
 - A Rust struct sent to the UI is typed in `src/bindings/` by ts-rs. Commit the regenerated files.
-- Commit messages follow `type(scope): description`, with the type in Thai as in the history (`เพิ่ม` add, `แก้ไข` fix, `ปรับปรุง` improve, `เอกสาร` docs, `ทดสอบ` tests, `ตั้งค่า` config). English descriptions are fine.
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) in English: `type(scope): description`, for example `feat(toolbar): add a create branch button` or `fix(tabs): keep the tab list inside the window`. Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`.
 - Keep user-facing text short and plain English.
 
 ## Code of conduct
