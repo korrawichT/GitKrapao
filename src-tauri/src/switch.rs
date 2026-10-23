@@ -39,6 +39,8 @@ fn parse_target(target: &str, remotes: &[String]) -> Option<Target> {
         .map(|r| Target::Remote { remote: r.clone(), name: rest[r.len() + 1..].to_string() })
 }
 
+/// Copy, so a step can run with another limit (`SwitchCtx { limit, ..*cx }`).
+#[derive(Clone, Copy)]
 pub(crate) struct SwitchCtx<'a> {
     /// Asks whether to stash and switch; true = stash.
     pub ask: &'a dyn Fn(&str) -> bool,
@@ -92,6 +94,7 @@ impl Steps {
             stdout: join(self.stdout),
             stderr: join(self.stderr),
             summary,
+            deleted: None,
         }
     }
 }

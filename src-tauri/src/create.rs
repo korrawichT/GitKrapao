@@ -8,6 +8,7 @@
 use super::fetch::{
     ask_native, assess, git_env, git_error, read_trust_config, sanitize, trust_file, trust_gate, GitResult, RepoLock, BUSY,
 };
+use super::refedit::UndoStore;
 use super::switch::{rev, succeeded, switch_in, Steps, SwitchCtx, LIMIT};
 use super::*;
 
@@ -22,7 +23,7 @@ pub(crate) enum NewRef<'a> {
 /// Plain check-ref-format on the full ref name, for branches too: `--branch`
 /// reads "@{-1}" as the previous branch (and so would `git branch`). A
 /// leading "-" would be an option; "HEAD" and "@" alone mean HEAD to git.
-fn valid_name(repo: &Path, full: &str, name: &str, env: &[(&str, &str)]) -> bool {
+pub(crate) fn valid_name(repo: &Path, full: &str, name: &str, env: &[(&str, &str)]) -> bool {
     !name.is_empty()
         && !name.starts_with('-')
         && name != "HEAD"
@@ -34,7 +35,7 @@ fn valid_name(repo: &Path, full: &str, name: &str, env: &[(&str, &str)]) -> bool
 /// Refs are files there (also for a teammate who fetches the ref): `" < > |`,
 /// a part ending in "." (Windows drops it, so "a./b" is the file of "a/b")
 /// and device names such as con, nul, aux/x and com1.txt.
-fn windows_unsafe(name: &str) -> bool {
+pub(crate) fn windows_unsafe(name: &str) -> bool {
     let device = |part: &str| {
         let stem = part.split('.').next().unwrap_or(part).to_ascii_lowercase();
         matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
@@ -47,7 +48,7 @@ fn windows_unsafe(name: &str) -> bool {
 /// with, compared without case (any letter, not only ASCII): names that
 /// differ only in case are one file on Windows and macOS, and next to a
 /// packed ref git itself lets such a name in, which in effect moves that ref.
-fn taken(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Option<String>, String> {
+pub(crate) fn taken(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Option<String>, String> {
     let out = git_env(repo, &["for-each-ref", "--format=%(refname)", ns], env).output().map_err(spawn_error)?;
     if !out.status.success() {
         return Err(git_error(&String::from_utf8_lossy(&out.stderr), out.status.code(), "git for-each-ref"));
@@ -71,6 +72,7 @@ fn then_switch(created: GitResult, switched: GitResult) -> GitResult {
         stdout: join(created.stdout, switched.stdout),
         stderr: join(created.stderr, switched.stderr),
         summary: format!("{} {}", created.summary, switched.summary),
+        deleted: None,
     }
 }
 
@@ -139,14 +141,28 @@ pub(crate) fn create_in(top: &str, what: NewRef, name: &str, at: &str, cx: &Swit
     }
 }
 
-/// Runs `create` under the repo's lock, with the native dialogs (their
-/// titles name the repo, as the tab asking may not be the active one).
-async fn run_create(
+/// What `run_op` hands an operation: switch's context (trust and stash
+/// questions, limit, PID slot), a confirm dialog, and the repo's Undo slot.
+pub(crate) struct OpCtx<'a> {
+    pub cx: SwitchCtx<'a>,
+    /// (title tail, OK label, Cancel label, text); true for OK. The native
+    /// dialog's title is "{op} — {repo}: {tail}".
+    pub confirm: &'a dyn Fn(&str, &str, &str, &str) -> bool,
+    pub undo: &'a UndoStore,
+    /// GitDirs::lock_key of the repo: an Undo token only works there.
+    pub key: &'a str,
+}
+
+/// Runs `f` under the repo's lock, with the native dialogs (their titles
+/// name the repo, as the tab asking may not be the active one). Shared by
+/// create, rename, delete and undo; `op` is e.g. "Create branch", and its
+/// first word labels the trust dialog's OK button.
+pub(crate) async fn run_op(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     op: &'static str,
     path: String,
-    create: impl FnOnce(&str, &SwitchCtx) -> GitResult + Send + 'static,
+    f: impl FnOnce(&str, &OpCtx) -> GitResult + Send + 'static,
 ) -> Result<GitResult, String> {
     let info = resolve_repo(&state, Path::new(&path))?;
     let dirs = state.dirs.lock().unwrap()[&info.path].clone(); // inserted by resolve_repo
@@ -156,12 +172,17 @@ async fn run_create(
         let pid = lock.pid();
         let _lock = lock;
         let state = app.state::<AppState>();
-        let ask_title = format!("{op} — {}: uncommitted changes", info.name);
-        let trust_title = format!("{op} — {}: trust this repository?", info.name);
+        let title = |tail: &str| format!("{op} — {}: {tail}", info.name);
+        let (ask_title, trust_title) = (title("uncommitted changes"), title("trust this repository?"));
+        let verb = op.split(' ').next().unwrap_or(op);
         let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", "Cancel", text);
-        let trust = |text: &str| ask_native(&app, &trust_title, "Create", "Cancel", text);
-        create(&info.path, &SwitchCtx {
-            ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&*pid),
+        let trust = |text: &str| ask_native(&app, &trust_title, verb, "Cancel", text);
+        let confirm = |tail: &str, ok: &str, cancel: &str, text: &str| ask_native(&app, &title(tail), ok, cancel, text);
+        f(&info.path, &OpCtx {
+            cx: SwitchCtx { ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&*pid) },
+            confirm: &confirm,
+            undo: &state.undo,
+            key: &dirs.lock_key,
         })
     })
     .await
@@ -180,7 +201,7 @@ pub(crate) async fn create_branch(
     checkout: bool,
     state: State<'_, AppState>,
 ) -> Result<GitResult, String> {
-    run_create(app, state, "Create branch", path, move |top, cx| create_in(top, NewRef::Branch { checkout }, &name, &at, cx)).await
+    run_op(app, state, "Create branch", path, move |top, o| create_in(top, NewRef::Branch { checkout }, &name, &at, &o.cx)).await
 }
 
 /// Creates tag `name` at the commit `at` (a hash): annotated when `message`
@@ -194,89 +215,17 @@ pub(crate) async fn create_tag(
     message: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<GitResult, String> {
-    run_create(app, state, "Create tag", path, move |top, cx| create_in(top, NewRef::Tag { message: message.as_deref() }, &name, &at, cx)).await
+    run_op(app, state, "Create tag", path, move |top, o| create_in(top, NewRef::Tag { message: message.as_deref() }, &name, &at, &o.cx)).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fetch::git_env;
-    use std::cell::{Cell, RefCell};
-
-    /// A repo whose main has two commits, "one" and "two", each with its own
-    /// a.txt. No user config leaks in; the folder is removed on drop. Trust and
-    /// stash questions are recorded and answered with `trust` / `stash`.
-    struct Fixture {
-        dir: PathBuf,
-        global: String,
-        trusted: RefCell<Vec<String>>,
-        trust: Cell<bool>,
-        asked: RefCell<Vec<String>>,
-        stash: Cell<bool>,
-        limit: Cell<Duration>,
-    }
+    use crate::testutil::Fixture;
 
     impl Fixture {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("gitkrapao-create-{name}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(dir.join("repo")).unwrap();
-            let global = dir.join("empty-global").to_string_lossy().replace('\\', "/");
-            std::fs::write(&global, "").unwrap();
-            let f = Fixture {
-                dir, global, trusted: RefCell::new(vec![]), trust: Cell::new(true), asked: RefCell::new(vec![]), stash: Cell::new(true),
-                limit: Cell::new(Duration::from_secs(60)),
-            };
-            f.git(&["init", "-q", "-b", "main"]);
-            f.write("a.txt", "one\n");
-            f.git(&["add", "-A"]);
-            f.git(&["commit", "-q", "-m", "one"]);
-            f.write("a.txt", "two\n");
-            f.git(&["commit", "-q", "-am", "two"]);
-            f
-        }
-        fn repo(&self) -> PathBuf { self.dir.join("repo") }
-        fn env(&self) -> Vec<(&str, &str)> {
-            vec![
-                ("GIT_CONFIG_GLOBAL", self.global.as_str()),
-                ("GIT_CONFIG_NOSYSTEM", "1"),
-                ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"),
-                ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t"),
-            ]
-        }
-        fn git(&self, args: &[&str]) -> String {
-            let out = git_env(&self.repo(), args, &self.env()).output().unwrap();
-            assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
-        fn fails(&self, args: &[&str]) -> bool {
-            !git_env(&self.repo(), args, &self.env()).output().unwrap().status.success()
-        }
-        fn write(&self, name: &str, body: &str) {
-            std::fs::write(self.repo().join(name), body).unwrap();
-        }
-        fn read(&self, name: &str) -> String {
-            std::fs::read_to_string(self.repo().join(name)).unwrap_or_default()
-        }
-        /// Full hash of a revision.
-        fn sha(&self, rev: &str) -> String { self.git(&["rev-parse", rev]) }
-        fn head(&self) -> String { self.git(&["symbolic-ref", "-q", "HEAD"]) }
-        fn refs(&self, prefix: &str) -> String { self.git(&["for-each-ref", "--format=%(refname)", prefix]) }
         fn create(&self, what: NewRef, name: &str, at: &str) -> GitResult {
-            let ask = |t: &str| { self.asked.borrow_mut().push(t.to_string()); self.stash.get() };
-            let trust = |t: &str| { self.trusted.borrow_mut().push(t.to_string()); self.trust.get() };
-            let env = self.env();
-            let lock = Mutex::new(());
-            let store = self.dir.join("trust.json");
-            create_in(&self.repo().to_string_lossy(), what, name, at, &SwitchCtx {
-                ask: &ask, trust: &trust, store: &store, store_lock: &lock, limit: self.limit.get(), env: &env, pid: None,
-            })
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
+            self.op(&UndoStore::default(), "k", |o| create_in(&self.top(), what, name, at, &o.cx))
         }
     }
 
@@ -288,7 +237,7 @@ mod tests {
     // where they were, and the branch tracks nothing.
     #[test]
     fn creates_a_branch_where_asked() {
-        let f = Fixture::new("branch");
+        let f = Fixture::new("create-branch");
         let one = f.sha("HEAD~1");
         let r = f.create(BRANCH, "feat/x", &one);
         assert!(r.ok && !r.cancelled, "{}: {}", r.summary, r.stderr);
@@ -304,7 +253,7 @@ mod tests {
     // Thai names go through to git and back unchanged.
     #[test]
     fn thai_names_work() {
-        let f = Fixture::new("thai");
+        let f = Fixture::new("create-thai");
         let head = f.sha("HEAD");
         let r = f.create(SWITCH, "ฟีเจอร์/ใหม่", &head);
         assert!(r.ok, "{}: {}", r.summary, r.stderr);
@@ -319,7 +268,7 @@ mod tests {
     // Create and switch: one Output entry with both steps.
     #[test]
     fn creates_a_branch_and_switches_to_it() {
-        let f = Fixture::new("checkout");
+        let f = Fixture::new("create-checkout");
         let one = f.sha("HEAD~1");
         let r = f.create(SWITCH, "feat", &one);
         assert!(r.ok && !r.cancelled, "{}: {}", r.summary, r.stderr);
@@ -334,7 +283,7 @@ mod tests {
     // result: the branch was created. Stash switches with the changes stashed.
     #[test]
     fn a_blocked_switch_keeps_the_new_branch() {
-        let f = Fixture::new("blocked");
+        let f = Fixture::new("create-blocked");
         let one = f.sha("HEAD~1");
         f.write("a.txt", "mine\n");
         f.stash.set(false);
@@ -361,7 +310,7 @@ mod tests {
     // annotated tag object that keeps the text as typed, even a leading "#".
     #[test]
     fn creates_lightweight_and_annotated_tags() {
-        let f = Fixture::new("tags");
+        let f = Fixture::new("create-tags");
         let one = f.sha("HEAD~1");
         let r = f.create(LIGHT, "v1", &one);
         assert!(r.ok, "{}: {}", r.summary, r.stderr);
@@ -387,7 +336,7 @@ mod tests {
     // trust check does not list): tags are never signed, whatever tag.gpgSign says.
     #[test]
     fn never_signs_a_tag() {
-        let f = Fixture::new("sign");
+        let f = Fixture::new("create-sign");
         let marker = f.dir.join("gpg-ran").to_string_lossy().replace('\\', "/");
         let gpg = f.dir.join("gpg.sh");
         std::fs::write(&gpg, format!("#!/bin/sh\ntouch '{marker}'\nexit 1\n")).unwrap();
@@ -410,7 +359,7 @@ mod tests {
     // "@{-1}" is no name: `git branch` would make it the previous branch.
     #[test]
     fn refuses_bad_or_taken_names() {
-        let f = Fixture::new("names");
+        let f = Fixture::new("create-names");
         let head = f.sha("HEAD");
         f.git(&["tag", "v1"]);
         f.git(&["switch", "-q", "-c", "old"]);
@@ -437,7 +386,7 @@ mod tests {
     // (Windows drops a trailing "."), which in effect moves that ref.
     #[test]
     fn refuses_names_windows_cannot_store() {
-        let f = Fixture::new("windows");
+        let f = Fixture::new("create-windows");
         let (one, head) = (f.sha("HEAD~1"), f.sha("HEAD"));
         f.git(&["branch", "a/b", &one]);
         f.git(&["tag", "v1/x", &one]);
@@ -466,7 +415,7 @@ mod tests {
     // in for the old ref, which in effect moves it. Any case, not only ASCII.
     #[test]
     fn a_packed_ref_in_another_case_is_taken() {
-        let f = Fixture::new("packed");
+        let f = Fixture::new("create-packed");
         let (one, head) = (f.sha("HEAD~1"), f.sha("HEAD"));
         for (kind, name) in [("branch", "feat"), ("branch", "ärger"), ("tag", "v1"), ("tag", "réléase")] {
             f.git(&[kind, name, &one]);
@@ -488,7 +437,7 @@ mod tests {
     // could read as an option.
     #[test]
     fn refuses_what_is_not_a_commit() {
-        let f = Fixture::new("at");
+        let f = Fixture::new("create-at");
         let tree = f.sha("HEAD^{tree}");
         let head = f.sha("HEAD");
         f.git(&["branch", "abcd1234", "HEAD~1"]);
@@ -524,7 +473,7 @@ mod tests {
     // anything runs, with the same store as fetch and switch.
     #[test]
     fn asks_before_running_the_repos_hooks() {
-        let f = Fixture::new("trust");
+        let f = Fixture::new("create-trust");
         let head = f.sha("HEAD");
         let marker = f.dir.join("hook-ran").to_string_lossy().replace('\\', "/");
         std::fs::write(f.repo().join(".git").join("hooks").join("reference-transaction"), format!("#!/bin/sh\ntouch '{marker}'\n")).unwrap();
@@ -547,7 +496,7 @@ mod tests {
     // A hook that hangs is stopped at the time limit.
     #[test]
     fn a_hung_hook_is_stopped() {
-        let f = Fixture::new("slow");
+        let f = Fixture::new("create-slow");
         let head = f.sha("HEAD");
         std::fs::write(f.repo().join(".git").join("hooks").join("reference-transaction"), "#!/bin/sh\nsleep 5\n").unwrap();
         f.limit.set(Duration::from_secs(1));

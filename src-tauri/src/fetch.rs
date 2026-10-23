@@ -7,6 +7,7 @@
 //! - refspecs that would write outside refs/remotes/ are refused;
 //! - 90 s limit, then the whole process tree is killed.
 
+use super::refedit::DeletedRef;
 use super::*;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -37,7 +38,7 @@ const TRUST_HOOKS: [&str; 6] = ["reference-transaction", "post-checkout", "post-
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
-/// Outcome of a fetch or a branch switch, shown in the Output drawer.
+/// Outcome of an operation (fetch, switch, create, rename, delete, undo), shown in the Output drawer.
 pub(crate) struct GitResult {
     pub ok: bool,
     pub timed_out: bool,
@@ -52,6 +53,10 @@ pub(crate) struct GitResult {
     pub stderr: String,
     /// One line for the banner; stderr keeps git's own words.
     pub summary: String,
+    /// Set when a branch or tag was deleted here: the UI offers Undo with its token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub deleted: Option<DeletedRef>,
 }
 
 impl GitResult {
@@ -67,6 +72,7 @@ impl GitResult {
             stdout: String::new(),
             stderr: String::new(),
             summary: summary.into(),
+            deleted: None,
         }
     }
 
@@ -620,6 +626,7 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> GitResult
         stdout: String::from_utf8_lossy(&r.stdout).into_owned(),
         summary: fetch_summary(ok, r.timed_out, exit_code, &stderr, ssh),
         stderr,
+        deleted: None,
     }
 }
 
