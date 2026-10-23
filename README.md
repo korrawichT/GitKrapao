@@ -20,7 +20,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
   - every branch, split into LOCAL and REMOTE, grouped into folders by name, with ahead/behind counts
   - STASHES
   - PULL REQUESTS from Azure DevOps
-- **Fetch:** the toolbar button or `Ctrl Shift F` runs `git fetch --all --prune`, set up so it never deletes or overwrites a local branch or tag. It runs only when you ask; there is no background fetch. Ahead/behind counts for the current branch show next to its name.
+- **Fetch:** the button in the middle of the toolbar or `Ctrl Shift F` runs `git fetch --all --prune`, set up so it never deletes or overwrites a local branch or tag. It runs only when you ask; there is no background fetch. Ahead/behind counts for the current branch show next to its name.
 - **Switch branch:** double-click a branch in the left panel or a label in the graph, or right-click it and choose **Switch to**.
   - A remote branch with no local copy gets a local branch that tracks it.
   - A local branch that is only behind its remote is fast-forwarded. One with its own commits is left as it is.
@@ -33,7 +33,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
 - **Rename branch:** right-click a local branch in the left panel or a label in the graph and choose **Rename branch**. The name is checked as you type, as for a new branch. Its upstream and history follow, and the checked-out branch can be renamed too. A new name that differs only in letter case is refused, because Windows stores both as one file. Branches you hid or soloed keep their setting under the new name in every tab of that repository you have opened in this session; a tab restored at startup but not opened yet, and a linked worktree that is not open as a tab, keep the old name.
 - **Delete branch or tag:** right-click a local branch (the checked-out one, here or in another worktree, cannot be deleted) or a tag label and choose **Delete branch** or **Delete tag**. Every delete asks in a native dialog that names the repository.
   - **Unmerged warning:** before it asks, the app counts the commits that no other branch, remote-tracking branch, tag, stash or HEAD reaches. If there are any, the dialog says how many will no longer be on any branch.
-  - After deleting a tag, if the repository has a remote called `origin`, the app asks whether to delete the tag there too and shows the URL. Nothing is pushed unless you say yes.
+  - After deleting a tag, if the repository has a remote called `origin`, the app asks whether to delete the tag there too and shows the URL. Nothing is pushed unless you say yes. If origin is a folder rather than a server, the question warns that pushing there runs that repository's own hooks.
   - A branch or tag that has a twin differing only in letter case (`feat` and `FEAT`) is refused, because Windows stores both as one file and git would act on both. The same goes for renaming or deleting a branch that HEAD names in another letter case.
   - Only local branches and tags are handled. Renaming or deleting a branch on a remote, and renaming a tag, are not supported yet.
 - **Undo bar:** after a delete, a bar under the toolbar offers **Undo**. It puts the branch back at its commit with its upstream setting, or the tag back with its message. It works on this machine only: a tag already deleted on origin stays deleted there, and Undo stops working once git has cleaned up (`git gc --prune`). The bar goes away when you dismiss it, start another operation or switch tab.
@@ -103,6 +103,7 @@ pnpm install
 pnpm run dev       # run the app in development mode (the first Rust compile takes several minutes)
 pnpm run build     # build the installers
 pnpm run mock      # build a sample repository for testing at .mock/demo-repo
+pnpm run screenshots # redo docs/screenshots from that repository in headless Edge
 pnpm run web:build # bundle the UI into dist/ (Tauri does this itself in dev and build)
 pnpm run typecheck # TypeScript, strict (esbuild does not check types)
 pnpm run test:ui   # UI tests in headless Microsoft Edge, including a layout snapshot
@@ -120,7 +121,7 @@ Don't share the whole `target` folder; it holds several GB of build files.
 `pnpm run mock` builds a fake repository, identical on every run, with:
 - 158 commits, branches, tags and a remote
 - 2 stashes
-- Thai commit messages
+- English commit messages
 
 Test against it instead of real work repositories.
 
@@ -151,6 +152,7 @@ scripts/
   web.mjs               bundles the UI with esbuild (also --watch, --test)
   check-bindings.mjs    fails when src/bindings no longer matches the Rust structs
   mock-repo.mjs         builds the sample repository
+  screenshots.mjs       makes the README screenshots from it
 tests/ui/               headless Edge UI suites and the layout snapshot
 CLAUDE.md               design rules and decisions (read before changing code)
 GLOSSARY.md             what the app means by branch, remote-tracking branch, unreachable commits, Undo
