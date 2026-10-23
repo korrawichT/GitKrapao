@@ -53,8 +53,14 @@ pub(crate) fn taken(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> 
     if !out.status.success() {
         return Err(git_error(&String::from_utf8_lossy(&out.stderr), out.status.code(), "git for-each-ref"));
     }
-    let want = format!("{ns}{name}").to_lowercase();
-    Ok(String::from_utf8_lossy(&out.stdout).lines().find(|r| r.to_lowercase() == want).map(|r| r[ns.len()..].to_string()))
+    let want = fold_case(&format!("{ns}{name}"));
+    Ok(String::from_utf8_lossy(&out.stdout).lines().find(|r| fold_case(r) == want).map(|r| r[ns.len()..].to_string()))
+}
+
+/// The form two ref names are compared in when letter case must not count
+/// (every letter, not only ASCII). Used by `taken` and by refedit's checks.
+pub(crate) fn fold_case(s: &str) -> String {
+    s.to_lowercase()
 }
 
 /// The new branch and the switch to it, as one Output entry. The branch exists

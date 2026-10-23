@@ -24,7 +24,7 @@ export const setup = () => `<script>
     + rec(D, E, 1700000120, 'tagged') + rec(E, '', 1700000100, 'root');
   const keys = { [DEMO]: DEMO, [WT]: DEMO, [OTHER]: OTHER };
   // op: resolves the operation running now (rename, delete, restore, fetch).
-  const f = window.__fake = { calls: [], op: null };
+  const f = window.__fake = { calls: [], op: null, refs };
   const held = () => new Promise(res => { f.op = res; });
   const answers = {
     open_repo: a => ({ path: a.path, name: a.path.split('/').pop(), lockKey: keys[a.path] }),
@@ -260,4 +260,21 @@ run(async () => {
   ok($('#outList .out-item:last-child .out-sum').textContent === 'Deleted.', 'logged in Output');
   tabs()[0].click(); await wait(300);
   ok(bar.hidden, 'back in the tab: no bar');
+
+  // ---- HEAD names the branch in another letter case ----
+  // On Windows HEAD "refs/heads/FEAT" resolves through the file of "feat":
+  // that is the checked-out branch, so Delete is off for it.
+  f.refs.headRef = 'refs/heads/FEAT'; f.refs.headSha = 'c'.repeat(40);
+  $('#refreshBtn').click(); await wait(300);
+  ctx(leaf('refs/heads/feat')); await wait(30);
+  ok(reason('Delete branch…') === 'The checked-out branch cannot be deleted', 'panel: HEAD in another case, Delete off', labels());
+  await esc();
+  // The graph has no label "FEAT", so it shows HEAD first: feat is in the "+N" box.
+  const cRef = msg('feat work').closest('.row').querySelector('.col-ref');
+  cRef.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); await wait(250);
+  const popFeat = $$('#body .ref-pop:not([hidden]) .pill').find(p => p.querySelector('.name').textContent === 'feat');
+  ok(!!popFeat, 'feat is in the label box');
+  if (popFeat) ctx(popFeat); await wait(30);
+  ok(reason('Delete branch…') === 'The checked-out branch cannot be deleted', 'graph: HEAD in another case, Delete off', labels());
+  await esc();
 });`;

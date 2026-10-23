@@ -5,7 +5,7 @@
 //! a loose ref file whatever the letter case. What Undo needs stays here in
 //! AppState.undo; the page only gets a token.
 
-use super::create::{run_op, taken, valid_name, windows_unsafe, OpCtx};
+use super::create::{fold_case, run_op, taken, valid_name, windows_unsafe, OpCtx};
 use super::fetch::{assess, git_env, git_error, read_trust_config, sanitize, trust_gate, GitResult};
 use super::switch::{rev, succeeded, Steps, SwitchCtx};
 use super::*;
@@ -111,11 +111,46 @@ fn case_sibling(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Resu
         return Err(git_error(&String::from_utf8_lossy(&out.stderr), out.status.code(), "git for-each-ref"));
     }
     let want = format!("{ns}{name}");
-    let lower = want.to_lowercase();
+    let lower = fold_case(&want);
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
-        .find(|r| *r != want && r.to_lowercase() == lower)
+        .find(|r| *r != want && fold_case(r) == lower)
         .map(|r| r[ns.len()..].to_string()))
+}
+
+/// Where branch `name` is checked out, compared without case (as `taken`
+/// does). On Windows HEAD "refs/heads/Feat" is the file of branch "feat",
+/// and git's own checks compare bytes: `git branch -D feat` would leave that
+/// HEAD on a branch that no longer exists.
+struct CheckedOut {
+    /// This worktree's HEAD, when it names the branch.
+    here: Option<String>,
+    /// Every worktree's HEAD that names it (this one included), from
+    /// `git worktree list --porcelain`.
+    all: Vec<String>,
+}
+
+fn checked_out(repo: &Path, name: &str, env: &[(&str, &str)]) -> Result<CheckedOut, String> {
+    let want = fold_case(&format!("{HEADS}{name}"));
+    let out = git_env(repo, &["symbolic-ref", "-q", "HEAD"], env).output().map_err(spawn_error)?;
+    // Exit 1 with -q: a detached HEAD.
+    if !out.status.success() && out.status.code() != Some(1) {
+        return Err(git_error(&String::from_utf8_lossy(&out.stderr), out.status.code(), "git symbolic-ref"));
+    }
+    let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let here = (!head.is_empty() && fold_case(&head) == want).then_some(head);
+    let out = git_env(repo, &["worktree", "list", "--porcelain"], env).output().map_err(spawn_error)?;
+    if !out.status.success() {
+        return Err(git_error(&String::from_utf8_lossy(&out.stderr), out.status.code(), "git worktree list"));
+    }
+    // An odd worktree path could only add a false match: a refusal.
+    let all = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.strip_prefix("branch "))
+        .filter(|r| fold_case(r) == want)
+        .map(String::from)
+        .collect();
+    Ok(CheckedOut { here, all })
 }
 
 /// The refusal text for a case sibling of branch `name`.
@@ -222,6 +257,28 @@ pub(crate) fn rename_in(top: &str, from: &str, to: &str, o: &OpCtx) -> GitResult
         Ok(Some(other)) => return refused(sibling_text(from, &other, "nothing was renamed"), false),
         Err(e) => return refused(format!("Could not read the branches, so nothing was renamed: {e}"), false),
     }
+    // A HEAD that names the branch byte for byte follows it (git moves it);
+    // one in another letter case would be left on a missing branch.
+    let full = format!("{HEADS}{from}");
+    match checked_out(repo, from, cx.env) {
+        Ok(c) => {
+            if let Some(h) = c.here.filter(|h| *h != full) {
+                let h = sanitize(h.get(HEADS.len()..).unwrap_or(&h), 120);
+                return refused(
+                    format!("HEAD names this branch as {h} (another letter case); renaming it would leave HEAD on a branch that does not exist, so nothing was renamed. Switch to another branch first."),
+                    false,
+                );
+            }
+            if let Some(h) = c.all.iter().find(|h| **h != full) {
+                let h = sanitize(h.get(HEADS.len()..).unwrap_or(h), 120);
+                return refused(
+                    format!("Another worktree has this branch checked out as {h} (another letter case); renaming it would leave that worktree on a branch that does not exist, so nothing was renamed. Switch that worktree to another branch first."),
+                    false,
+                );
+            }
+        }
+        Err(e) => return refused(format!("Could not read the worktrees, so nothing was renamed: {e}"), false),
+    }
     if to == from {
         return refused(format!("The branch is already called {t}."), false);
     }
@@ -269,12 +326,17 @@ pub(crate) fn delete_branch_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
         Ok(Some(other)) => return refused(sibling_text(name, &other, "nothing was deleted"), false),
         Err(e) => return refused(format!("Could not read the branches, so nothing was deleted: {e}"), false),
     }
-    match git_env(repo, &["symbolic-ref", "-q", "HEAD"], cx.env).output() {
-        Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == full => {
-            return refused("The checked-out branch cannot be deleted.".into(), false);
+    // Without case: a HEAD "Feat" resolves through "feat" on Windows.
+    match checked_out(repo, name, cx.env) {
+        Ok(c) if c.here.is_some() => return refused("The checked-out branch cannot be deleted.".into(), false),
+        Ok(c) if !c.all.is_empty() => {
+            return refused(
+                format!("Branch {shown} is checked out in another worktree, so nothing was deleted. Switch that worktree to another branch first."),
+                false,
+            );
         }
         Ok(_) => {}
-        Err(e) => return refused(spawn_error(e), false),
+        Err(e) => return refused(format!("Could not read the worktrees, so nothing was deleted: {e}"), false),
     }
     let config = match branch_config(repo, name, cx.env) {
         Ok(c) => c,
@@ -729,8 +791,8 @@ mod tests {
         assert_eq!(lost_text(Some(0), "branch"), "");
     }
 
-    // The checked-out branch is refused before any question; one checked out
-    // in another worktree gets git's own error and stays.
+    // The checked-out branch, here or in another worktree, is refused before
+    // any question (git is never asked).
     #[test]
     fn refuses_the_checked_out_branch() {
         let f = Fixture::new("refedit-del-head");
@@ -743,9 +805,61 @@ mod tests {
         let wt = f.dir.join("wt").to_string_lossy().replace('\\', "/");
         f.git(&["worktree", "add", "-q", "-b", "other", &wt]);
         let r = f.del_branch(&undo, "other");
-        assert!(!r.ok && !r.cancelled && r.exit_code.is_some() && r.deleted.is_none(), "{}", r.summary);
-        assert!(r.summary.contains("worktree"), "{}", r.summary);
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none() && r.deleted.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "Branch other is checked out in another worktree, so nothing was deleted. Switch that worktree to another branch first.");
+        assert!(f.confirms.borrow().is_empty() && f.trusted.borrow().is_empty());
         assert_eq!(f.refs(HEADS), "refs/heads/main\nrefs/heads/other");
+    }
+
+    // HEAD names "Feat" while the branch is "feat": on Windows that is the
+    // same file, so HEAD resolves through it. git compares bytes, so
+    // `branch -D feat` / `-m feat x` would leave HEAD on a branch that no
+    // longer exists. Both are refused before any question.
+    #[test]
+    fn refuses_a_branch_checked_out_in_another_letter_case() {
+        let f = Fixture::new("refedit-head-alias");
+        let one = f.sha("HEAD~1");
+        f.git(&["branch", "feat", &one]);
+        f.git(&["symbolic-ref", "HEAD", "refs/heads/Feat"]);
+        let before = f.git(&["for-each-ref", "--format=%(objectname) %(refname)", HEADS]);
+        let undo = UndoStore::default();
+        let r = f.del_branch(&undo, "feat");
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none() && r.deleted.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "The checked-out branch cannot be deleted.");
+        let r = f.rename("feat", "other");
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "HEAD names this branch as Feat (another letter case); renaming it would leave HEAD on a branch that does not exist, so nothing was renamed. Switch to another branch first.");
+        assert!(f.confirms.borrow().is_empty() && f.trusted.borrow().is_empty());
+        assert_eq!(f.git(&["for-each-ref", "--format=%(objectname) %(refname)", HEADS]), before);
+        assert_eq!(f.head(), "refs/heads/Feat");
+    }
+
+    // The same through a linked worktree's HEAD. A byte-exact HEAD there
+    // still allows a rename (git moves that HEAD too), never a delete.
+    #[test]
+    fn refuses_a_branch_another_worktree_has_in_another_letter_case() {
+        let f = Fixture::new("refedit-wt-alias");
+        f.git(&["branch", "other"]);
+        let wt = f.dir.join("wt");
+        f.git(&["worktree", "add", "-q", &wt.to_string_lossy().replace('\\', "/"), "other"]);
+        f.git_in(&wt, &["symbolic-ref", "HEAD", "refs/heads/Other"]);
+        let undo = UndoStore::default();
+        let r = f.del_branch(&undo, "other");
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none() && r.deleted.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "Branch other is checked out in another worktree, so nothing was deleted. Switch that worktree to another branch first.");
+        let r = f.rename("other", "x");
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "Another worktree has this branch checked out as Other (another letter case); renaming it would leave that worktree on a branch that does not exist, so nothing was renamed. Switch that worktree to another branch first.");
+        assert!(f.confirms.borrow().is_empty() && f.trusted.borrow().is_empty());
+        assert_eq!(f.refs(HEADS), "refs/heads/main\nrefs/heads/other");
+        assert_eq!(f.git_in(&wt, &["symbolic-ref", "HEAD"]), "refs/heads/Other");
+
+        f.git_in(&wt, &["symbolic-ref", "HEAD", "refs/heads/other"]);
+        let r = f.rename("other", "renamed");
+        assert!(r.ok, "{}: {}", r.summary, r.stderr);
+        assert_eq!(f.git_in(&wt, &["symbolic-ref", "HEAD"]), "refs/heads/renamed", "the worktree's HEAD follows");
+        let r = f.del_branch(&undo, "renamed");
+        assert!(!r.ok && r.summary.starts_with("Branch renamed is checked out in another worktree"), "{}", r.summary);
     }
 
     // A branch that moves while the dialog is open is not deleted.

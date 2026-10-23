@@ -1344,6 +1344,10 @@ function showBrowser({ raws, repo, sample, note = '', keep = false }: Omit<Brows
 }
 
 interface Branch { name: string; ref: string; sha: string; head?: boolean }
+/* Whether two full ref names are the same without letter case (any letter).
+   On Windows HEAD "refs/heads/Feat" resolves through the file of branch
+   "feat", so that is the checked-out branch; the backend compares the same way. */
+const sameRef = (a: string, b: string | null) => b !== null && a.toLowerCase() === b.toLowerCase();
 type BranchList = { local: Branch[]; remote: Map<string, Branch[]>; detached: string | null };
 function branchList(): BranchList{
   const local: Branch[] = [], remote = new Map<string, Branch[]>(); let detached: string | null = null;
@@ -1353,7 +1357,7 @@ function branchList(): BranchList{
     // Remote names can contain "/", so match the longest known one first.
     const names = [...S.remotes!].sort((a, b) => b.length - a.length);
     refs.refs.forEach(([sha, ref]) => {
-      if (ref.startsWith('refs/heads/')) local.push({ name: ref.slice(11), ref, sha, head: ref === refs.headRef });
+      if (ref.startsWith('refs/heads/')) local.push({ name: ref.slice(11), ref, sha, head: sameRef(ref, refs.headRef) });
       else if (ref.startsWith('refs/remotes/')) {
         const rest = ref.slice(13), r = names.find(n => rest.startsWith(n + '/')) || rest.split('/')[0]!;
         const name = rest.slice(r.length + 1);
@@ -2091,7 +2095,7 @@ sideList.addEventListener('contextmenu', e => {
   const entries: CtxEntry[] = [{ label: show ? 'Show' : 'Hide', off: opOff() || (solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : ''), run: () => toggleHidden(ref) }];
   if (leaf && NATIVE) entries.unshift({ label: `Switch to ${refLabel(ref)}`, off: switchOff(el.classList.contains('is-head')), run: () => runSwitch(ref) });
   if (leaf) entries.push({ label: 'Copy branch name', run: () => copyText(refLabel(ref)) });
-  if (leaf && ref.startsWith('refs/heads/')) entries.push(...branchEntries(ref.slice('refs/heads/'.length), el.classList.contains('is-head')));
+  if (leaf && ref.startsWith('refs/heads/')) entries.push(...branchEntries(ref.slice('refs/heads/'.length)));
   openCtx(e, entries, el);
 });
 /* Double-click a branch (panel or graph label) to switch to it. */
@@ -2149,7 +2153,7 @@ body.addEventListener('contextmenu', e => {
     { label: 'Copy branch name', run: () => copyText(g.local ? g.name : `${g.remotes[0]}/${g.name}`) },
   ];
   if (NATIVE) entries.unshift({ label: `Switch to ${g.local ? g.name : `${g.remotes[0]}/${g.name}`}`, off: switchOff(g.head), run: () => runSwitch(groupRef(g)) });
-  if (g.local) entries.push(...branchEntries(g.name, g.head));
+  if (g.local) entries.push(...branchEntries(g.name));
   if (c) entries.push(...createEntries(c));
   openCtx(e, entries, null);
 });
@@ -2819,10 +2823,12 @@ function createEntries(c: Commit): CtxEntry[] {
    script cannot answer) and counts the commits that would be left on no
    branch. A delete shows the Undo bar. */
 const HEAD_DEL = 'The checked-out branch cannot be deleted';
-/* Rename and Delete for the local branch `name` (short). */
-function branchEntries(name: string, head: boolean): CtxEntry[] {
+/* Rename and Delete for the local branch `name` (short). Delete is off for
+   the checked-out branch, read from the full snapshot (a label's own mark is
+   exact and missing in solo without HEAD) and compared without case. */
+function branchEntries(name: string): CtxEntry[] {
   if (!NATIVE) return [];
-  const off = createOff();
+  const off = createOff(), head = sameRef('refs/heads/' + name, S.refs ? S.refs.headRef : null);
   return [
     { label: 'Rename branch…', off, run: () => openRename(name) },
     { label: 'Delete branch…', off: head ? HEAD_DEL : off, run: () => runDelete('branch', name) },
