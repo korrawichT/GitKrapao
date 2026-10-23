@@ -95,12 +95,28 @@ fn exact(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Opti
         .find_map(|l| l.split_once(' ').filter(|(_, r)| *r == want).map(|(o, _)| o.to_string())))
 }
 
+/// More stashes than this would not fit the Windows command line: no count.
+const MAX_STASHES: usize = 500;
+
 /// Commits reachable from `tip` that nothing but `full` reaches: no other
-/// branch, remote-tracking branch, tag, the stash, HEAD or another
-/// worktree's HEAD (all in `--all`). None when git failed or took too long.
+/// branch, remote-tracking branch, tag, HEAD or another worktree's HEAD (all
+/// in `--all`), and no stash. `--all` has only stash@{0} (refs/stash); the
+/// older ones live in its reflog, so every stash commit is listed too. None
+/// when git failed or took too long.
 fn unreachable(repo: &Path, full: &str, tip: &str, cx: &SwitchCtx) -> Option<u32> {
+    let out = git_env(repo, &["stash", "list", "--format=%H"], cx.env).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stashes: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if stashes.len() > MAX_STASHES {
+        return None;
+    }
     let exclude = format!("--exclude={full}");
-    let cmd = git_env(repo, &["rev-list", "--count", tip, "--not", &exclude, "--all"], cx.env);
+    // Everything after --not is on the excluded side, the stash commits included.
+    let args = [&["rev-list", "--count", tip, "--not", &exclude, "--all"][..], &stashes].concat();
+    let cmd = git_env(repo, &args, cx.env);
     let r = run_limited(cmd, cx.limit.min(COUNT_LIMIT), 4096, cx.pid).ok()?;
     if !succeeded(&r) {
         return None;
@@ -634,6 +650,17 @@ mod tests {
         f.git(&["stash", "push", "-q"]);
         f.git(&["switch", "-q", "main"]);
         assert_eq!(f.count("refs/heads/stashed", &s), Some(0), "stash");
+
+        // An older stash (stash@{1}) lives only in refs/stash's reflog, which --all does not read.
+        f.git(&["switch", "-q", "-c", "older"]);
+        let o = f.commit("older");
+        f.write("a.txt", "older\n");
+        f.git(&["stash", "push", "-q"]);
+        f.git(&["switch", "-q", "main"]);
+        f.write("a.txt", "newer\n");
+        f.git(&["stash", "push", "-q"]);
+        assert_eq!(f.git(&["stash", "list", "--format=%gd"]).lines().count(), 3);
+        assert_eq!(f.count("refs/heads/older", &o), Some(0), "an older stash");
 
         let d = f.side("detached");
         f.git(&["switch", "-q", "--detach", &d]);
