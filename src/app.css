@@ -7,6 +7,10 @@
   --lanes:#0b8fb3,#3f7cf6,#a454f0,#e341c3,#f23f5f,#d46210,#a87d00,#3d9a2a,#13977a;
   --add:#1a7f37; --del:#cf222e;
   --sx-kw:#cf222e; --sx-st:#0a3069; --sx-cm:#6e7781; --sx-nu:#0550ae; --sx-fn:#8250df; --sx-ty:#953800; --sx-tg:#116329;
+  --scroll:#c3c9d2;
+  /* color-scheme: the WebView draws scrollbars and form controls for this theme
+     (white scrollbars on the dark theme otherwise); scrollbar-color is inherited */
+  color-scheme:light; scrollbar-color:var(--scroll) transparent;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
   padding-bottom:env(safe-area-inset-bottom,0px);
@@ -20,6 +24,7 @@
     --lanes:#17abd4,#3f7cf6,#a454f0,#e341c3,#ff4d6a,#ff8c32,#f2c230,#62cc4a,#25cfa4;
     --add:#3fb950; --del:#f85149;
     --sx-kw:#ff7b72; --sx-st:#a5d6ff; --sx-cm:#8b949e; --sx-nu:#79c0ff; --sx-fn:#d2a8ff; --sx-ty:#ffa657; --sx-tg:#7ee787;
+    --scroll:#4a5260; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
@@ -30,6 +35,7 @@
   --lanes:#17abd4,#3f7cf6,#a454f0,#e341c3,#ff4d6a,#ff8c32,#f2c230,#62cc4a,#25cfa4;
   --add:#3fb950; --del:#f85149;
   --sx-kw:#ff7b72; --sx-st:#a5d6ff; --sx-cm:#8b949e; --sx-nu:#79c0ff; --sx-fn:#d2a8ff; --sx-ty:#ffa657; --sx-tg:#7ee787;
+  --scroll:#4a5260; color-scheme:dark;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:border-box}

@@ -10,6 +10,11 @@ const hex = s => '#' + s.match(/\\d+/g).slice(0, 3).map(v => (+v).toString(16).p
 
 run(async () => {
   const T = window.__gitkrapao;
+  // Scrollbars follow the theme (they were white on the dark theme).
+  const rs = getComputedStyle(document.documentElement), th = document.documentElement.dataset.theme;
+  ok(rs.colorScheme === th, 'color-scheme follows the theme', rs.colorScheme + ' vs ' + th);
+  const bar = getComputedStyle(document.querySelector('#wrap')).scrollbarColor;
+  ok(bar === (th === 'dark' ? 'rgb(74, 82, 96) rgba(0, 0, 0, 0)' : 'rgb(195, 201, 210) rgba(0, 0, 0, 0)'), 'scrollbar thumb in theme colors, no track', bar);
   for (const h of T.PALETTE.concat(['#8a93a1', '#6e7786', '#ffffff', '#000000', '#808080'])) {
     const t = T.textOn(h), w = cr('#ffffff', h), d = cr('#15181d', h);
     ok(Math.abs(cr(t, h) - Math.max(w, d)) < 1e-9, 'textOn picks the more readable text on ' + h, t + ' white ' + w.toFixed(2) + ' dark ' + d.toFixed(2));
