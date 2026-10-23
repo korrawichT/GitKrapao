@@ -2670,6 +2670,7 @@ const opOff = () => opHere() ? OP_OFF : '';
 const capOff = () => ops.size >= MAX_OPS && !opHere() ? CAP_OFF : '';
 const tabRunning = (t: Tab) => !!t.info && ops.has(t.info.lockKey);
 
+const NO_REPO = 'No repository open';
 /* The toolbar and panel controls of the active tab: Fetch (its operation, the
    cap), and Refresh, Show all and the eye/solo buttons (body.op-running),
    which are off while its repo has an operation. */
@@ -2683,7 +2684,7 @@ function updateFetchBtn(){
   b.classList.toggle('running', here);
   b.setAttribute('aria-label', here ? 'Fetching' : 'Fetch');
   // The operation first: a repo waiting for it shows no remotes yet.
-  b.title = op ? OP_BUSY[op.kind] : none ? 'No remotes'
+  b.title = op ? OP_BUSY[op.kind] : !current ? NO_REPO : none ? 'No remotes'
     : cap || 'Fetch all remotes (Ctrl/⌘ Shift F)';
   updateBranchBtn();
   const off = opOff();
@@ -2819,15 +2820,19 @@ function createEntries(c: Commit): CtxEntry[] {
 /* The toolbar's Create branch: at the selected commit (not a stash row), else
    at HEAD when it is loaded. The dialog names the commit either way. */
 function branchTarget(): Commit | undefined {
-  const c = sel >= 0 ? S.commits[sel] : undefined;
+  // A stash or PR card: the graph row under it is only where it points (a
+  // stash's base when its own row is not loaded), not a pick.
+  const c = sel >= 0 && !(detailFor && detailFor.card) ? S.commits[sel] : undefined;
   if (c && !c.stashRow) return c;
   const h = current && S.refs && S.refs.headSha ? S.idx.get(S.refs.headSha) : undefined;
   return h === undefined ? undefined : S.commits[h];
 }
-// Also run on select: with HEAD not in the graph, only a selection gives a target.
+/* Run on select, on render and with the other toolbar state; hovering or
+   focusing the button runs it again, since a sync that changes no label
+   (HEAD moved under solo) renders nothing. A click reads the target afresh. */
 function updateBranchBtn(){
   if (!NATIVE) return;
-  const off = createOff() || (branchTarget() ? '' : 'No commit to branch from');
+  const off = !current ? NO_REPO : createOff() || (branchTarget() ? '' : 'No commit to branch from');
   $('#branchBtn').setAttribute('aria-disabled', String(!!off));
   $('#branchBtn').title = off || 'Create branch at the selected commit, or HEAD';
 }
@@ -3138,6 +3143,8 @@ if (NATIVE) {
   $('#fetchBtn').hidden = false;
   $('#branchBtn').hidden = false;
   $('#branchBtn').addEventListener('click', () => { const c = branchTarget(); if (c) openCreate('branch', c); });
+  $('#branchBtn').addEventListener('pointerenter', updateBranchBtn);
+  $('#branchBtn').addEventListener('focus', updateBranchBtn);
   // aria-disabled instead of disabled, so the "No remotes" tooltip still shows.
   $('#fetchBtn').addEventListener('click', () => { if ($('#fetchBtn').getAttribute('aria-disabled') !== 'true') runFetch(); });
   $('#emptyOpen').addEventListener('click', pickRepo);

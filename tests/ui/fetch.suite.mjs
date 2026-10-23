@@ -56,7 +56,19 @@ run(async () => {
     'icon only: name and tooltip', JSON.stringify([btn.textContent, btn.getAttribute('aria-label'), btn.title]));
   const theme = $('#themeBtn').getBoundingClientRect(), bar = $('.toolbar').getBoundingClientRect();
   ok(Math.abs(bar.right - 14 - theme.right) <= 1, 'the right group still ends at the right edge', theme.right + ' vs ' + bar.right);
-  ok(!$('#openBtn'),'no Open repo button (the repo menu, Ctrl/⌘ O and the empty page open one)');
+  // About 1000px wide with long names: the left group shrinks (names end in
+  // "…") instead of its items running over each other or the middle.
+  const tb = $('.toolbar'), keep = [$('#repoName').textContent, $('#headName').textContent];
+  tb.style.width = '1000px';
+  $('#repoName').textContent = 'a-very-long-repository-name-for-testing';
+  $('#headName').textContent = 'feature/a-very-long-branch-name-here';
+  const kids = [...$('.tb-l').children].filter(e => e.getBoundingClientRect().width > 0).map(e => e.getBoundingClientRect());
+  const overlap = kids.slice(1).some((k, i) => k.left < kids[i].right - 0.5)
+    || $('#repoBtn').getBoundingClientRect().right > $('.tb-l .sep').getBoundingClientRect().left;   // the button reaches 7px past its box
+  ok(!overlap && kids[kids.length - 1].right <= $('.tb-mid').getBoundingClientRect().left + 0.5 && Math.round($('#sideBtn').getBoundingClientRect().width) === 30,
+    'narrow toolbar, long names: no overlap', JSON.stringify(kids.map(k => [Math.round(k.left), Math.round(k.right)])));
+  tb.style.width = ''; [$('#repoName').textContent, $('#headName').textContent] = keep;
+  ok(!$('#openBtn'), 'no Open repo button (the repo menu, Ctrl/⌘ O and the empty page open one)');
 
   if (!f.remotes.length) {
     ok(btn.getAttribute('aria-disabled') === 'true' && btn.title === 'No remotes', 'no remotes: disabled with "No remotes"', btn.title);

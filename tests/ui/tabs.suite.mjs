@@ -183,6 +183,8 @@ run(async () => {
   key('t', { ctrlKey: true }); await wait(100);
   ok(genB > 0 && f.stops.slice(st0).includes(genB), 'new tab stops the history stream of b', genB + ' ' + JSON.stringify(f.stops));
   ok(tabs().length === 3 && names()[2] === 'New tab' && active() === 2 && empty() && $$('#emptyRecent .recent-item').length === 3, 'new tab', state() + ' | empty=' + empty());
+  ok(['#fetchBtn', '#branchBtn'].every(s => $(s).getAttribute('aria-disabled') === 'true' && $(s).title === 'No repository open'),
+    'new tab: Fetch and Create branch off, saying why', $('#fetchBtn').title + ' | ' + $('#branchBtn').title);
   await click($('#emptyRecent .recent-item[data-path="' + A + '"]'), 300);
   ok(tabs().length === 2 && names().join() === 'a,b' && active() === 0 && rows().includes('a-three') && !empty(), 'new tab: picking an open repo activates its tab', state());
 
