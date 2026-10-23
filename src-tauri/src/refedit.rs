@@ -184,6 +184,21 @@ fn no_userinfo(url: &str) -> String {
     }
 }
 
+/// A push URL git reaches over the network (http(s), ssh, git, scp-style
+/// "host:path"). Anything else (a path, a share, file://, a "helper::" URL)
+/// is pushed to by running git in that repository, so its own hooks run
+/// (pre-receive, update, post-receive), which the trust check never saw.
+fn network_url(url: &str) -> bool {
+    if url.contains("::") {
+        return false;
+    }
+    if let Some((scheme, _)) = url.split_once("://") {
+        return ["http", "https", "ssh", "git", "git+ssh", "ssh+git"].iter().any(|s| scheme.eq_ignore_ascii_case(s));
+    }
+    // scp-style: a colon before any slash; "C:/x" is a drive letter.
+    url.split_once(':').is_some_and(|(host, _)| host.len() > 1 && !host.contains(['/', '\\']))
+}
+
 /// More stashes than this would not fit the Windows command line: no count.
 const MAX_STASHES: usize = 500;
 
@@ -444,13 +459,20 @@ pub(crate) fn delete_tag_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
     if !has_origin {
         return done(steps, &r, format!("Deleted tag {name} ({short})."), true, false);
     }
-    // Every push URL: the push goes to all of them.
-    let urls: String = git_env(repo, &["remote", "get-url", "--push", "--all", "origin"], cx.env)
+    // Every push URL, after insteadOf / pushInsteadOf: the push goes to all of them.
+    let urls: Vec<String> = git_env(repo, &["remote", "get-url", "--push", "--all", "origin"], cx.env)
         .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).lines().map(|u| format!("  {}\n", sanitize(&no_userinfo(u.trim()), 200))).collect())
+        .map(|out| String::from_utf8_lossy(&out.stdout).lines().map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).collect())
         .unwrap_or_default();
+    let list: String = urls.iter().map(|u| format!("  {}\n", sanitize(&no_userinfo(u), 200))).collect();
+    // The repo's own config names origin: a folder there runs its hooks on push.
+    let local = if !urls.is_empty() && urls.iter().all(|u| network_url(u)) {
+        ""
+    } else {
+        "\n\nOrigin is a folder on this computer or network, not a server: pushing there runs that repository's own hooks (pre-receive, update, post-receive), which GitKrapao did not check. Delete on origin only if you trust that repository."
+    };
     let text = format!(
-        "Tag {shown} was deleted in this repository. Also delete it on origin?\n\n{urls}\nTeammates who already fetched it keep their copy, and Undo does not bring it back on origin."
+        "Tag {shown} was deleted in this repository. Also delete it on origin?\n\n{list}\nTeammates who already fetched it keep their copy, and Undo does not bring it back on origin.{local}"
     );
     if !(o.confirm)("also delete on origin?", "Delete on origin", "Keep on origin", &text) {
         return done(steps, &r, format!("Deleted tag {name} ({short}); kept on origin."), true, false);
@@ -993,6 +1015,7 @@ mod tests {
         let q = f.confirms.borrow()[1].clone();
         assert_eq!((q.tail.as_str(), q.ok.as_str(), q.cancel.as_str()), ("also delete on origin?", "Delete on origin", "Keep on origin"));
         assert!(q.text.contains(&bare.to_string_lossy().replace('\\', "/")), "names the URL: {}", q.text);
+        assert!(q.text.contains("Origin is a folder on this computer or network"), "a folder origin runs its own hooks: {}", q.text);
         assert!(r.deleted.as_ref().is_some_and(|d| d.on_origin));
         assert!(!on_origin("v1"));
 
@@ -1111,6 +1134,44 @@ mod tests {
         let text = f.confirms.borrow()[1].text.clone();
         assert!(!text.contains("SECRETPAT") && !text.contains("me:"), "{text}");
         assert!(text.contains(&format!("  {bare}\n  https://example.invalid/r.git\n")), "{text}");
+        assert!(text.contains("Origin is a folder"), "one folder among the URLs is enough: {text}");
+    }
+
+    // A folder (path, share, file://), also one an insteadOf rewrite leads
+    // to, gets the hooks warning; a server does not.
+    #[test]
+    fn a_folder_origin_is_named_as_one() {
+        for (url, net) in [
+            ("https://github.com/o/r.git", true),
+            ("HTTP://host/r", true),
+            ("ssh://git@host:22/r.git", true),
+            ("git://host/r", true),
+            ("git@github.com:o/r.git", true),
+            ("host:r.git", true),
+            ("C:/repos/origin.git", false),
+            ("C:\\repos\\origin.git", false),
+            ("\\\\server\\share\\r.git", false),
+            ("//server/share/r.git", false),
+            ("file:///C:/r.git", false),
+            ("../origin.git", false),
+            ("/srv/r.git", false),
+            ("ext::sh -c x", false),
+            ("foo::https://host/r", false),
+        ] {
+            assert_eq!(network_url(url), net, "{url}");
+        }
+        let f = Fixture::new("refedit-tag-folder");
+        f.git(&["remote", "add", "origin", "https://example.invalid/r.git"]);
+        f.git(&["tag", "v1"]);
+        f.git(&["tag", "v2"]);
+        f.answer(&[true, false]);
+        f.del_tag(&UndoStore::default(), "v1");
+        assert!(!f.confirms.borrow()[1].text.contains("Origin is a folder"), "a server: no warning");
+        f.git(&["config", "url.C:/evil/.pushInsteadOf", "https://example.invalid/"]);
+        f.answer(&[true, false]);
+        f.del_tag(&UndoStore::default(), "v2");
+        let text = f.confirms.borrow()[3].text.clone();
+        assert!(text.contains("  C:/evil/r.git\n") && text.contains("Origin is a folder"), "pushInsteadOf to a folder: {text}");
     }
 
     /* ---------- restore ---------- */
