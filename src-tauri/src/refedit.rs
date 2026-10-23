@@ -104,7 +104,8 @@ fn exact(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Opti
 /// Another ref under `ns` whose name equals `name` without case (any letter,
 /// as in `taken`) but not byte for byte. On Windows git reads and writes
 /// such a pair as one file: `git branch -D feat` next to a loose "FEAT"
-/// deletes FEAT's commit as well, and `-m` renames the wrong tip.
+/// deletes FEAT's commit as well, and `-m` renames the wrong tip. Tags too:
+/// deleting a packed "v1" removes a loose "V1", which Undo would not restore.
 fn case_sibling(repo: &Path, ns: &str, name: &str, env: &[(&str, &str)]) -> Result<Option<String>, String> {
     let out = git_env(repo, &["for-each-ref", "--format=%(refname)", ns], env).output().map_err(spawn_error)?;
     if !out.status.success() {
@@ -153,10 +154,10 @@ fn checked_out(repo: &Path, name: &str, env: &[(&str, &str)]) -> Result<CheckedO
     Ok(CheckedOut { here, all })
 }
 
-/// The refusal text for a case sibling of branch `name`.
-fn sibling_text(name: &str, other: &str, nothing: &str) -> String {
+/// The refusal text for a case sibling of branch (or tag: `noun`) `name`.
+fn sibling_text(noun: &str, name: &str, other: &str, nothing: &str) -> String {
     format!(
-        "Another branch, {}, differs from {} only in letter case; Windows stores both as one file, so {nothing}. Rename or delete one of them in a terminal first.",
+        "Another {noun}, {}, differs from {} only in letter case; Windows stores both as one file, so {nothing}. Rename or delete one of them in a terminal first.",
         sanitize(other, 120),
         sanitize(name, 120)
     )
@@ -275,7 +276,7 @@ pub(crate) fn rename_in(top: &str, from: &str, to: &str, o: &OpCtx) -> GitResult
     }
     match case_sibling(repo, HEADS, from, cx.env) {
         Ok(None) => {}
-        Ok(Some(other)) => return refused(sibling_text(from, &other, "nothing was renamed"), false),
+        Ok(Some(other)) => return refused(sibling_text("branch", from, &other, "nothing was renamed"), false),
         Err(e) => return refused(format!("Could not read the branches, so nothing was renamed: {e}"), false),
     }
     // A HEAD that names the branch byte for byte follows it (git moves it);
@@ -344,7 +345,7 @@ pub(crate) fn delete_branch_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
     };
     match case_sibling(repo, HEADS, name, cx.env) {
         Ok(None) => {}
-        Ok(Some(other)) => return refused(sibling_text(name, &other, "nothing was deleted"), false),
+        Ok(Some(other)) => return refused(sibling_text("branch", name, &other, "nothing was deleted"), false),
         Err(e) => return refused(format!("Could not read the branches, so nothing was deleted: {e}"), false),
     }
     // Without case: a HEAD "Feat" resolves through "feat" on Windows.
@@ -403,6 +404,12 @@ pub(crate) fn delete_tag_in(top: &str, name: &str, o: &OpCtx) -> GitResult {
         Ok(None) => return refused(format!("Tag {shown} does not exist."), false),
         Err(e) => return refused(format!("Could not read the tags, so nothing was deleted: {e}"), false),
     };
+    // A packed "v1" next to a loose "V1": on Windows deleting one removes both.
+    match case_sibling(repo, TAGS, name, cx.env) {
+        Ok(None) => {}
+        Ok(Some(other)) => return refused(sibling_text("tag", name, &other, "nothing was deleted"), false),
+        Err(e) => return refused(format!("Could not read the tags, so nothing was deleted: {e}"), false),
+    }
     // An annotated tag is a tag object: count from, and show, its commit.
     let commit = rev(repo, &obj, cx.env);
     let short = commit.as_deref().unwrap_or(&obj)[..7].to_string();
@@ -1272,6 +1279,26 @@ exit 0
         assert!(r.summary.starts_with("Another branch, FEAT, differs from feat only in letter case;") && r.summary.contains("nothing was renamed"), "{}", r.summary);
         assert!(f.confirms.borrow().is_empty() && f.trusted.borrow().is_empty());
         assert_eq!(f.git(&["for-each-ref", "--format=%(objectname) %(refname)", HEADS]), refs, "both refs intact");
+    }
+
+    // The same for tags: deleting a packed "v1" next to a loose "V1" removes
+    // both on Windows, and Undo would bring back only v1.
+    #[test]
+    fn refuses_a_tag_with_a_case_sibling() {
+        let f = Fixture::new("refedit-tag-case-sibling");
+        f.git(&["tag", "v1"]);
+        f.git(&["pack-refs", "--all"]);
+        f.git(&["update-ref", "refs/tags/V1", "HEAD"]);
+        let refs = f.git(&["for-each-ref", "--format=%(objectname) %(refname)", TAGS]);
+        assert_eq!(refs.lines().count(), 2, "{refs}");
+        let undo = UndoStore::default();
+        let r = f.del_tag(&undo, "v1");
+        assert!(!r.ok && !r.cancelled && r.exit_code.is_none() && r.deleted.is_none(), "{}", r.summary);
+        assert_eq!(r.summary, "Another tag, V1, differs from v1 only in letter case; Windows stores both as one file, so nothing was deleted. Rename or delete one of them in a terminal first.");
+        let r = f.del_tag(&undo, "V1");
+        assert!(!r.ok && r.summary.starts_with("Another tag, v1, differs from V1"), "{}", r.summary);
+        assert!(f.confirms.borrow().is_empty() && f.trusted.borrow().is_empty());
+        assert_eq!(f.git(&["for-each-ref", "--format=%(objectname) %(refname)", TAGS]), refs, "both tags intact");
     }
 
     // A token works only in the repo that made it, only for the last delete
