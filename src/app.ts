@@ -2796,8 +2796,8 @@ function runSwitch(ref: string){
 }
 
 /* ---------- create a branch or tag at a commit ---------- */
-/* Right-click a commit row, or a label on it: "Create branch here…" /
-   "Create tag here…" (desktop only; not on the WIP row or a stash). The
+/* Right-click a commit row, or a label on it: "Create branch" /
+   "Create tag" (desktop only; not on the WIP row or a stash). The
    dialog checks the name as it is typed (refname.ts) and the backend checks
    again with git. It keeps the commit's hash and the repo's lock key, not a
    row: a sync can move rows while it is open, and the ref must go to the repo
@@ -2811,8 +2811,8 @@ function createEntries(c: Commit): CtxEntry[] {
   if (!NATIVE || c.stashRow) return [];
   const off = createOff();
   return [
-    { label: 'Create branch here…', off, run: () => openCreate('branch', c) },
-    { label: 'Create tag here…', off, run: () => openCreate('tag', c) },
+    { label: 'Create branch', off, run: () => openCreate('branch', c) },
+    { label: 'Create tag', off, run: () => openCreate('tag', c) },
   ];
 }
 
@@ -2845,14 +2845,14 @@ function branchEntries(name: string): CtxEntry[] {
   if (!NATIVE) return [];
   const off = createOff(), head = sameRef('refs/heads/' + name, S.refs ? S.refs.headRef : null);
   return [
-    { label: 'Rename branch…', off, run: () => openRename(name) },
-    { label: 'Delete branch…', off: head ? HEAD_DEL : off, run: () => runDelete('branch', name) },
+    { label: 'Rename branch', off, run: () => openRename(name) },
+    { label: 'Delete branch', off: head ? HEAD_DEL : off, run: () => runDelete('branch', name) },
   ];
 }
 /* A tag label's menu; c: its commit. Desktop only (pillTag). */
 function tagEntries(name: string, c: Commit | undefined): CtxEntry[] {
   return [
-    { label: 'Delete tag…', off: createOff(), run: () => runDelete('tag', name) },
+    { label: 'Delete tag', off: createOff(), run: () => runDelete('tag', name) },
     { label: 'Copy tag name', run: () => copyText(name) },
     ...(c ? createEntries(c) : []),
   ];
