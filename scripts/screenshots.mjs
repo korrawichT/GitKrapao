@@ -74,7 +74,8 @@ for (const theme of ['dark', 'light']) {
   const png = join(root, 'docs', 'screenshots', `graph-${theme}.png`);
   const r = spawnSync(edge, ['--headless=new', '--disable-gpu', '--allow-file-access-from-files',`--user-data-dir=${prof}`,
     '--virtual-time-budget=4000', '--window-size=1440,880', `--screenshot=${png}`, pathToFileURL(page).href], { encoding: 'utf8' });
-  rmSync(prof, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // Edge can keep its profile folder for a moment after it exits (EPERM on Windows); a leftover temp folder is harmless.
+  try { rmSync(prof, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (e) { if (e.code !== 'EPERM' && e.code !== 'EBUSY') throw e; }
   if (r.status !== 0 || !existsSync(png)) { console.error(r.stderr); process.exit(1); }
   console.log(`wrote ${png}`);
 }
