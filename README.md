@@ -19,8 +19,8 @@ A desktop Git client built around a clear commit graph. Every branch gets its ow
 - **Fetch:** `git fetch --all --prune`, only when you press it. It never deletes or overwrites a local branch or tag.
 - **Switch branch:** double-click a branch. Uncommitted changes are never lost; the app offers to stash them first.
 - **Create branch or tag:** right-click a commit. Names are checked as you type, and nothing is pushed.
-- **Rename and delete branch, delete tag:** local only. Deleting warns how many commits would be left on no branch.
-- **Undo:** brings a deleted branch or tag back on this machine.
+- **Rename and delete branch, delete tag:** local only. Deleting warns how many commits would be left on no branch. Two names that differ only in letter case are refused, because Windows stores them as one file.
+- **Undo:** brings a deleted branch or tag back on this machine only. It stops working after `git gc --prune`, and a tag already deleted on origin stays deleted there.
 - **Trust check:** asks before git runs anything a repository's own config or hooks set up.
 - **Output:** a drawer with every git command the app ran and what git printed.
 - **Hide and Solo:** hide branches you don't need, or show only a few.
@@ -95,7 +95,7 @@ cd src-tauri && cargo test --lib   # Rust unit tests (also regenerates src/bindi
 
 `pnpm run build` writes to `src-tauri/target/release/bundle/`: `nsis/GitKrapao_<version>_x64-setup.exe` (the installer to share) and `msi/GitKrapao_<version>_x64_en-US.msi`. Don't share the whole `target` folder; it holds several GB.
 
-Test against `pnpm run mock`, never real work repositories. It builds the same fake repository every run: 107 commits, many merged branches, tags, a remote and 1 stash.
+Test against `pnpm run mock`, never real work repositories. It builds the same fake repository every run: about 100 commits, many merged branches, tags, a remote and 1 stash.
 
 After `pnpm run web:build`, opening `dist/index.html` in a browser starts a mode with built-in sample data where you can paste `git log` output. No Rust is needed.
 

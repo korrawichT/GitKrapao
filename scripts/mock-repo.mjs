@@ -98,6 +98,14 @@ const mergeInto = (into, from, msg, who) => {
   const f = branches.get(from);
   return commitTo(into, msg, threeWay(branches.get(into).files, f.files, f.base), { who, merge: [f.mark] });
 };
+/* A release branch is a full snapshot of develop, so main takes every file that
+   differs, as a real merge would. */
+const releaseInto = (into, from, msg, who) => {
+  const a = branches.get(into).files, f = branches.get(from), changes = [];
+  for (const [p, c] of f.files) if (a.get(p) !== c) changes.push({ op: 'M', path: p, content: c });
+  for (const p of a.keys()) if (!f.files.has(p)) changes.push({ op: 'D', path: p });
+  return commitTo(into, msg, changes, { who, merge: [f.mark] });
+};
 /* Merge `from` (develop) into a branch that is still open, so it catches up. */
 const pullInto = (into, from, msg, who) => {
   const f = branches.get(from), i = branches.get(into);
@@ -168,7 +176,7 @@ function release(minor, during = () => {}){
   commitTo(rel, `Bump version to ${v}`, [bump(v)], { who: lead });
   during();
   commitTo(rel, `Update CHANGELOG for ${v}`, [edit(branches.get(rel).files, 'CHANGELOG.md', `## ${v}`)], { who: lead });
-  tagAt(`v${v}`, mergeInto('main', rel, `Merge branch '${rel}'`, lead), `Release ${v}`);
+  tagAt(`v${v}`, releaseInto('main', rel, `Merge branch '${rel}'`, lead), `Release ${v}`);
   mergeInto('develop', rel, `Merge branch '${rel}' into develop`, lead);
   drop(rel);
 }
