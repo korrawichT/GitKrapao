@@ -1,13 +1,13 @@
 # GitKrapao
 
-A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
+A Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 
 ## Name
-- The app is called **GitKrapao** (a pun on GitKraken and กะเพรา): `productName`, `mainBinaryName`, the window title, the page title and user-facing messages.
+- The app is called **GitKrapao** (Git + กะเพรา, Thai holy basil): `productName`, `mainBinaryName`, the window title, the page title and user-facing messages.
 - The project folder is `D:\gitkrapao` (renamed from `D:\lanes`). Internal names are `gitkrapao` too: the Cargo crate (`gitkrapao`, `gitkrapao_lib`), package.json, the test hook `window.__gitkrapao` and the mock marker `.git/gitkrapao-mock` (`pnpm run mock` still accepts the old `lanes-mock`). Only two things keep the old name `lanes`, on purpose: the localStorage keys (`lanes.*`) and the Tauri `identifier` (`local.lanes.gitgraph`). Never rename them: the identifier picks the WebView data folder, so changing either loses every user's saved settings (hidden branches, solo, column widths, recent repos). `bundle.publisher` is set to `GitKrapao` on purpose: without it Tauri takes the identifier's second part, and Windows "Installed apps" showed the publisher as `lanes`. ("lanes" is also the graph's own word for its columns: `--lanes`, `laneStashes`, `Layout.lanes`.)
 
 ## Goal
-- The feature that must be best-in-class is the history graph of commits, branches and merges: as beautiful and easy to read as GitKraken's.
+- The feature that must be best-in-class is the history graph of commits, branches and merges: beautiful and readable at a glance.
 - When designing or making UI decisions, weigh graph clarity (lanes, branches, merges) first.
 
 ## Graph rendering (src/app.ts)
@@ -171,7 +171,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 - The JS side waits 100 ms before fetching (for fast arrow-key browsing) and caches 300 commits.
 
 ## Test data
-- Never test with the user's real work repos. Use `pnpm run mock`, which builds `.mock/demo-repo` with `git fast-import`, identical on every run: 158 commits, main/develop/feature/release/hotfix, tags, a remote with upstreams that are ahead, 2 stashes (one with untracked files), and English messages (it feeds the README screenshots). The script only deletes and rebuilds a folder that has the marker `.git/gitkrapao-mock` (or the older `.git/lanes-mock`). Thai text is still covered by the unit tests and `tests/ui/fixtures/mock-log.txt` (an older Thai mock log, kept for the layout baseline).
+- Never test with the user's real work repos. Use `pnpm run mock`, which builds `.mock/demo-repo` with `git fast-import`, identical on every run: 107 commits from a scripted history (features side by side, pull-request merges, develop merged into open branches, releases and hotfixes merged into main and back, tags), branches still open (release/0.5, feature/reports, feature/mobile-nav, and feature/offline-mode only on origin), a remote with upstreams that are ahead, 1 stash (with an untracked file), and English messages (it feeds the README screenshots). The script only deletes and rebuilds a folder that has the marker `.git/gitkrapao-mock` (or the older `.git/lanes-mock`). Thai text is still covered by the unit tests and `tests/ui/fixtures/mock-log.txt` (an older Thai mock log, kept for the layout baseline).
 - `pnpm run screenshots` (`scripts/screenshots.mjs`) redoes `docs/screenshots/graph-{dark,light}.png`: the production bundle in headless Edge at 1440×880 with a fake `__TAURI__` answering from `.mock/demo-repo` through the backend's own git commands, three tabs, the checked-out commit selected. It never opens the real app, whose WebView data holds the user's tabs and repos.
 - Browser mode (`pnpm run web:build`, then open `dist/index.html`) uses built-in sample data and needs no git.
 - UI tests: `pnpm run test:ui` (headless Edge, a fresh profile per suite) runs `tests/ui/*.suite.mjs` against a test bundle; suites marked `prodSafe` (those that do not read `window.__gitkrapao`) also run against the minified production bundle. `capture.js` is injected before the suite's setup and app.js, so an error or unhandled rejection while the page boots fails the suite. `tabs.suite.mjs`, `tabs-ops.suite.mjs` and `repo-switch.suite.mjs` cover the repository tabs (see Tabs). `layout.suite.mjs` compares every row (hash, lane, color) and edge of the sample and of `tests/ui/fixtures/mock-log.txt` with `fixtures/layout-baseline.json`; refresh the baseline (`-- --write-baseline`) only for an intended layout change.
