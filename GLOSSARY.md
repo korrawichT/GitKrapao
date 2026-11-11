@@ -1,6 +1,6 @@
 # GitKrapao
 
-A desktop Git history viewer whose graph of commits, branches and merges is the main feature. It also makes a few changes to a repository when asked: fetch, switch, create, rename and delete.
+A desktop Git client built around a clear commit graph. It changes a repository only when asked: fetch, switch, create, rename and delete.
 
 ## Language
 

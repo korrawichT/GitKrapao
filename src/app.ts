@@ -693,7 +693,7 @@ function paintGraph(a: number, b: number){
   ctx.font = NODE_FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (let i = a; i < b; i++) {
     const c = S.commits[i]!, x = lx(c.lane), y = Y(ry(i)), k = c.color % PALETTE.length;
-    if (c.stashRow) {   // a gray box, like GitKraken's stash nodes
+    if (c.stashRow) {   // a gray box marks a stash
       ctx.beginPath(); ctx.roundRect(x - R + 1.5, y - R + 1.5, 2 * R - 3, 2 * R - 3, 4);
       ctx.fillStyle = th.muted; ctx.fill(); ctx.stroke();
       ctx.fillStyle = th.stroke; ctx.fillRect(x - 4, y - 1, 8, 2);
@@ -1238,8 +1238,8 @@ const CHEVRON = '<span class="sb-chev"><svg width="10" height="10" viewBox="0 0 
 /* ---------- hidden branches ----------
    Per repository: full ref names, or prefixes ending in "/" for a whole
    folder or remote. Hidden refs leave the walk (git log --exclude) and lose
-   their labels; commits that a visible ref also reaches stay, as in
-   GitKraken. The checked-out branch is never hidden. */
+   their labels; commits that a visible ref also reaches stay.
+   The checked-out branch is never hidden. */
 const HIDDEN_KEY = 'lanes.hidden';
 const repoKey = (path?: string) => path || (current ? current.path : 'browser:' + S.repo);
 // Saved lists come from localStorage: keep only string entries.
@@ -1572,14 +1572,14 @@ async function jumpTo(sha: string, { detail: show = true }: { detail?: boolean }
   const i = S.idx.get(sha);
   if (i === undefined) { showError('That commit is not in the loaded history.'); return; }
   select(i, { detail: show });
-  // Center the row, the way GitKraken does when you pick a branch.
+  // Center the row when a branch is picked.
   wrap.scrollTop = Math.max(0, rowOff + i * ROW_H + ROW_H / 2 - (wrap.clientHeight - HEAD_H) / 2);
   if (narrowView()) showSide(false);
 }
 
 /* ---------- work in progress (desktop) ----------
    A row above the newest commit while the work tree has uncommitted
-   changes, joined to HEAD by a dashed line, like GitKraken's WIP row. Work
+   changes, joined to HEAD by a dashed line. Work
    tree edits do not touch .git, so the ref fingerprint cannot see them;
    work_status is polled on its own, slower when status is slow. */
 const WIP_EVERY = 4000;
@@ -2398,8 +2398,8 @@ function dropRepo({ empty = true }: { empty?: boolean } = {}){
   if (empty) showEmpty(); else $('#emptyState').hidden = true;
 }
 
-/* Opening a repo (recent menu, Ctrl/⌘ O, the empty state) fills the active tab,
-   as GitKraken's repository menu does; with no tabs it makes one first. */
+/* Opening a repo (recent menu, Ctrl/⌘ O, the empty state) fills the active tab;
+   with no tabs it makes one first. */
 let openSeq = 0;   // the newest open or tab switch wins: open_repo of an earlier click may answer late
 async function openPath(path: string){
   closeMenu();
