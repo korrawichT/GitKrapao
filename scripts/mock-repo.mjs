@@ -1,7 +1,10 @@
 // Builds a fake but realistic Git repository for developing GitKrapao without
-// touching real work repos: main/develop/feature/release/hotfix branches,
-// pull-request merges, annotated tags, remote-tracking refs, several authors,
-// English messages, and adds, edits, deletes, renames and a binary.
+// touching real work repos. The history is scripted, so the graph is the same
+// every time and reads well: several feature branches run side by side and
+// merge back through pull requests, develop is merged into long-lived branches,
+// releases and hotfixes merge into main and back, and a few branches are still
+// open. It also has annotated tags, remote-tracking refs, six authors, English
+// messages, one stash, and adds, edits, deletes, renames and a binary.
 //
 // usage: node scripts/mock-repo.mjs [outDir]    (default: .mock/demo-repo)
 // The output is rebuilt on every run; the same input always gives the same history.
@@ -21,7 +24,7 @@ rmSync(out, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 mkdirSync(out, { recursive: true });
 const git = (args, input) => execFileSync('git', ['-C', out, ...args], { input, stdio: ['pipe', 'pipe', 'inherit'] }).toString();
 git(['init', '-q', '-b', 'main']);
-// LF in the work tree whatever the global setting, so stashes hold only real edits.
+// LF in the work tree whatever the global setting, so the stash holds only real edits.
 git(['config', 'core.autocrlf', 'false']);
 
 /* ---------- deterministic randomness and clock ---------- */
@@ -45,19 +48,22 @@ const emit = s => chunks.push(Buffer.isBuffer(s) ? s : Buffer.from(s, 'utf8'));
 const data = s => { const b = Buffer.isBuffer(s) ? s : Buffer.from(s, 'utf8'); emit(`data ${b.length}\n`); emit(b); emit('\n'); };
 const quote = p => '"' + p.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 
-const branches = new Map();   // name -> { mark, files: Map(path -> content), deleted: Set(path) }
+// name -> { mark, files: Map(path -> content), base: Map }. `base` is the tree the
+// branch last shared with the branch it will merge into (where it was cut, or the
+// last time it pulled that branch), so a merge takes only what the branch changed.
+const branches = new Map();
 const dropped = [];          // branches deleted after merging, removed once imported
 function commitTo(name, msg, changes, { who = pick(PEOPLE), merge = [] } = {}){
   const b = branches.get(name);
-  const files = new Map(b ? b.files : []), deleted = new Set(b ? b.deleted : []);
+  const files = new Map(b ? b.files : []);
   const ops = [];
   for (const c of changes) {
     if (c.op === 'M') {
       const blob = ++markSeq;
       emit(`blob\nmark :${blob}\n`); data(c.content);
       ops.push(`M 100644 :${blob} ${c.path}\n`); files.set(c.path, c.content);
-    } else if (c.op === 'D') { ops.push(`D ${quote(c.path)}\n`); files.delete(c.path); deleted.add(c.path); }
-    else if (c.op === 'R') { ops.push(`R ${quote(c.from)} ${quote(c.to)}\n`); files.set(c.to, files.get(c.from)); files.delete(c.from); deleted.add(c.from); }
+    } else if (c.op === 'D') { ops.push(`D ${quote(c.path)}\n`); files.delete(c.path); }
+    else if (c.op === 'R') { ops.push(`R ${quote(c.from)} ${quote(c.to)}\n`); files.set(c.to, files.get(c.from)); files.delete(c.from); }
   }
   const mark = ++markSeq, t = tick();
   emit(`commit refs/heads/${name}\nmark :${mark}\n`);
@@ -67,23 +73,38 @@ function commitTo(name, msg, changes, { who = pick(PEOPLE), merge = [] } = {}){
   merge.forEach(m => emit(`merge :${m}\n`));
   ops.forEach(emit);
   emit('\n');
-  branches.set(name, { mark, files, deleted });
+  branches.set(name, { mark, files, base: b ? b.base : new Map() });
   return mark;
 }
-const branchOff = (name, from) => { const b = branches.get(from); branches.set(name, { mark: b.mark, files: new Map(b.files), deleted: new Set(b.deleted) }); };
+const branchOff = (name, from) => { const b = branches.get(from); branches.set(name, { mark: b.mark, files: new Map(b.files), base: new Map(b.files) }); };
 const drop = name => { branches.delete(name); dropped.push(name); };
 const tagAt = (tag, mark, msg, t = clock) => { const w = PEOPLE[0]; emit(`tag ${tag}\nfrom :${mark}\ntagger ${w[0]} <${w[1]}> ${t} +0700\n`); data(msg); };
 const remoteAt = (ref, mark) => emit(`reset refs/remotes/origin/${ref}\nfrom :${mark}\n\n`);
 
-/* Merge `from` into `into`: the result takes every file that differs, and
-   drops files that `from` deleted or renamed away. */
-function mergeInto(into, from, msg, who){
-  const a = branches.get(into).files, f = branches.get(from);
+/* What a merge changes: every file that `theirs` changed since `base` wins; a
+   file that `ours` deleted stays deleted. */
+function threeWay(ours, theirs, base){
   const changes = [];
-  for (const [p, c] of f.files) if (a.get(p) !== c) changes.push({ op: 'M', path: p, content: c });
-  for (const p of a.keys()) if (!f.files.has(p) && f.deleted.has(p)) changes.push({ op: 'D', path: p });
-  return commitTo(into, msg, changes, { who, merge: [f.mark] });
+  for (const p of new Set([...theirs.keys(), ...base.keys()])) {
+    const t = theirs.get(p), o = ours.get(p), b = base.get(p);
+    if (t === b || t === o) continue;
+    if (o === undefined && b !== undefined) continue;
+    changes.push(t === undefined ? { op: 'D', path: p } : { op: 'M', path: p, content: t });
+  }
+  return changes;
 }
+/* Merge `from` into `into` (a pull request, a release, a hotfix). */
+const mergeInto = (into, from, msg, who) => {
+  const f = branches.get(from);
+  return commitTo(into, msg, threeWay(branches.get(into).files, f.files, f.base), { who, merge: [f.mark] });
+};
+/* Merge `from` (develop) into a branch that is still open, so it catches up. */
+const pullInto = (into, from, msg, who) => {
+  const f = branches.get(from), i = branches.get(into);
+  const mark = commitTo(into, msg, threeWay(i.files, f.files, i.base), { who, merge: [f.mark] });
+  branches.get(into).base = new Map(f.files);
+  return mark;
+};
 
 /* ---------- content helpers ---------- */
 const edit = (files, p, line) => ({ op: 'M', path: p, content: (files.get(p) || '') + line + '\n' });
@@ -92,6 +113,7 @@ const ts = name => `export function ${name.replace(/\W/g, '_')}() {\n  return '$
 
 /* ---------- history ---------- */
 const lead = PEOPLE[1];
+const TEAM = [PEOPLE[0], PEOPLE[2], PEOPLE[3], PEOPLE[4], PEOPLE[5]];
 commitTo('main', 'Initial commit', [
   { op: 'M', path: 'README.md', content: '# Acme Webapp\n\nSample project for trying out GitKrapao\n' },
   { op: 'M', path: 'package.json', content: '{\n  "name": "acme-webapp",\n  "version": "0.1.0"\n}\n' },
@@ -104,81 +126,121 @@ commitTo('main', 'Add app logo and icons', [{ op: 'M', path: 'assets/logo.png', 
 tagAt('v0.1.0', branches.get('main').mark, 'First tagged build');
 branchOff('develop', 'main');
 
-const FEATURES = ['auth', 'dashboard', 'notifications', 'dark-mode', 'export-csv', 'search', 'i18n-thai', 'payments', 'profile', 'audit-log', 'offline-mode', 'charts', 'onboarding', 'settings'];
-const WORK = [
-  x => `Add ${x} component`, x => `Wire up ${x} API`, x => `Fix ${x} edge case when the list is empty`,
-  x => `Refactor ${x} into hooks`, x => `Add tests for ${x}`, x => `Polish ${x} styles`,
-  x => `Speed up ${x} loading`, x => `Fix ${x} bug when there is no data`, x => `Add Thai translations to ${x}`,
+/* Feature work: a branch has one owner, and its commits follow a fixed story,
+   so no branch repeats a subject. */
+const STORY = [
+  x => `Add ${x} component`, x => `Wire up ${x} API`, x => `Add tests for ${x}`,
+  x => `Fix ${x} edge case when the list is empty`, x => `Polish ${x} styles`, x => `Refactor ${x} into hooks`,
+  x => `Add Thai translations to ${x}`,
 ];
-const BODIES = [
-  '', '', '',
-  'The old version re-rendered on every keystroke.\n\n- debounce input by 150 ms\n- keep the cursor position',
-  'Details:\n- check for empty values before calling the API\n- add a test for a user who is not signed in',
-  'Follow-up to the review comments.\n\nCo-authored-by: Pim Suwan <pim@example.com>',
-];
-let pr = 10, minor = 1;
-function featureCommit(br, x){
-  const files = branches.get(br).files, roll = rand();
-  const changes = [];
-  const own = [...files.keys()].filter(p => p.includes(x));
-  if (!own.length || roll < 0.3) changes.push({ op: 'M', path: `src/${x}/${pick(['index', 'view', 'store', 'api'])}.ts`, content: ts(x + int(1, 99)) });
-  else changes.push(edit(files, pick(own), `// ${x} ${int(1, 999)}`));
-  if (rand() < 0.35) changes.push(edit(files, files.has('src/main-app.ts') ? 'src/main-app.ts' : 'src/app.ts', `import './${x}';`));
-  if (rand() < 0.15) changes.push({ op: 'M', path: `docs/${x}.md`, content: `# ${x}\n\nNotes for the team\n` });
-  const subject = pick(WORK)(x), body = pick(BODIES);
-  commitTo(br, body ? `${subject}\n\n${body}` : subject, changes);
+const BODIES = {
+  1: 'Calls the new endpoint and keeps the last good result while loading.',
+  2: 'Details:\n- check for empty values before calling the API\n- add a test for a user who is not signed in',
+  4: 'Follow-up to the review comments.\n\nCo-authored-by: Pim Suwan <pim@example.com>',
+};
+const owner = new Map(), told = new Map();
+let pr = 10, ownerN = 0;
+const open = br => { branchOff(br, 'develop'); owner.set(br, TEAM[ownerN++ % TEAM.length]); told.set(br, 0); };
+function work(br, n = 1){
+  const x = br.split('/').pop();
+  for (let k = 0; k < n; k++) {
+    const files = branches.get(br).files, i = told.get(br); told.set(br, i + 1);
+    const own = [...files.keys()].filter(p => p.includes(x)), changes = [];
+    if (!own.length) changes.push({ op: 'M', path: `src/${x}/index.ts`, content: ts(x) });
+    else if (i % 3 === 1) changes.push({ op: 'M', path: `src/${x}/${pick(['view', 'store', 'api'])}.ts`, content: ts(x + int(1, 99)) });
+    else changes.push(edit(files, pick(own), `// ${x} ${int(1, 999)}`));
+    if (i === 1) changes.push(edit(files, files.has('src/main-app.ts') ? 'src/main-app.ts' : 'src/app.ts', `import './${x}';`));
+    if (i === 3) changes.push({ op: 'M', path: `docs/${x}.md`, content: `# ${x}\n\nNotes for the team\n` });
+    const subject = STORY[i % STORY.length](x), body = BODIES[i];
+    commitTo(br, body ? `${subject}\n\n${body}` : subject, changes, { who: rand() < 0.15 ? pick(PEOPLE) : owner.get(br) });
+  }
 }
+const land = br => { mergeInto('develop', br, `Merge pull request #${++pr} from acme/${br}\n\n${br.split('/').pop()}`, lead); drop(br); };
+const catchUp = br => pullInto(br, 'develop', `Merge branch 'develop' into ${br}`, owner.get(br));
+const chore = (msg, who = pick(PEOPLE)) => commitTo('develop', msg, [edit(branches.get('develop').files, 'docs/CONTRIBUTING.md', `- ${msg}`)], { who });
+const bump = v => ({ op: 'M', path: 'package.json', content: `{\n  "name": "acme-webapp",\n  "version": "${v}"\n}\n` });
 
-for (let sprint = 0; sprint < 7; sprint++) {
-  const active = [];
-  for (let k = 0; k < int(2, 3); k++) {
-    const n = sprint * 2 + k, x = FEATURES[n % FEATURES.length] + (n >= FEATURES.length ? '-v2' : ''), br = `feature/${x}`;
-    if (branches.has(br)) continue;
-    branchOff(br, 'develop');
-    active.push({ br, x, left: int(2, 6) });
-  }
-  while (active.some(f => f.left > 0)) {
-    if (rand() < 0.15) commitTo('develop', pick(['Update dependencies', 'Fix flaky date formatting test', 'Update CHANGELOG', 'Tidy lint warnings']),
-      [edit(branches.get('develop').files, 'package.json', '')]);
-    const f = pick(active.filter(a => a.left > 0));
-    featureCommit(f.br, f.x); f.left--;
-    if (f.left === 1 && rand() < 0.3) mergeInto(f.br, 'develop', `Merge branch 'develop' into ${f.br}`, pick(PEOPLE));
-    if (f.left === 0) {
-      mergeInto('develop', f.br, `Merge pull request #${++pr} from acme/${f.br}\n\n${f.x}`, lead);
-      if (sprint < 6) drop(f.br);      // most merged branches get deleted
-    }
-  }
-  // release
-  const rel = `release/0.${++minor}`;
+/* A release branch is cut from develop, merged into main (tagged) and back
+   into develop. `during` runs while it is open, so develop keeps moving. */
+function release(minor, during = () => {}){
+  const rel = `release/0.${minor}`, v = `0.${minor}.0`;
   branchOff(rel, 'develop');
-  commitTo(rel, `Bump version to 0.${minor}.0`, [{ op: 'M', path: 'package.json', content: `{\n  "name": "acme-webapp",\n  "version": "0.${minor}.0"\n}\n` }], { who: lead });
-  commitTo(rel, `Update CHANGELOG for 0.${minor}.0`, [edit(branches.get(rel).files, 'CHANGELOG.md', `## 0.${minor}.0\n- ${active.map(a => a.x).join(', ')}`)], { who: lead });
-  tagAt(`v0.${minor}.0`, mergeInto('main', rel, `Merge branch '${rel}'`, lead), `Release 0.${minor}.0`);
+  commitTo(rel, `Bump version to ${v}`, [bump(v)], { who: lead });
+  during();
+  commitTo(rel, `Update CHANGELOG for ${v}`, [edit(branches.get(rel).files, 'CHANGELOG.md', `## ${v}`)], { who: lead });
+  tagAt(`v${v}`, mergeInto('main', rel, `Merge branch '${rel}'`, lead), `Release ${v}`);
   mergeInto('develop', rel, `Merge branch '${rel}' into develop`, lead);
   drop(rel);
-  if (sprint === 1) {   // a rename and a delete land on develop
-    const files = branches.get('develop').files;
-    commitTo('develop', 'Rename app.ts to main-app.ts', [{ op: 'R', from: 'src/app.ts', to: 'src/main-app.ts' }]);
-    if (files.has('.github/workflows/ci.yml')) commitTo('develop', 'Remove the old unused workflow', [{ op: 'D', path: '.github/workflows/ci.yml' }]);
-  }
-  if (sprint === 3 || sprint === 5) {   // hotfix on main
-    const hf = `hotfix/login-crash-${sprint}`;
-    branchOff(hf, 'main');
-    commitTo(hf, 'Fix crash when session cookie is missing', [edit(branches.get(hf).files, 'src/index.ts', '// guard missing cookie')], { who: PEOPLE[2] });
-    tagAt(`v0.${minor}.1`, mergeInto('main', hf, `Merge branch '${hf}'`, lead), `Hotfix 0.${minor}.1`);
-    mergeInto('develop', hf, `Merge branch '${hf}' into develop`, lead);
-    drop(hf);
-  }
-  if (sprint === 4) commitTo('develop', 'Update the logo', [{ op: 'M', path: 'assets/logo.png', content: png(520) }], { who: PEOPLE[3] });
+}
+/* A fix on main, tagged, and merged back into develop. */
+function hotfix(slug, v, who, msg){
+  const hf = `hotfix/${slug}`;
+  branchOff(hf, 'main');
+  commitTo(hf, msg, [edit(branches.get(hf).files, 'src/index.ts', `// guard ${slug}`)], { who });
+  tagAt(`v${v}`, mergeInto('main', hf, `Merge branch '${hf}'`, lead), `Hotfix ${v}`);
+  mergeInto('develop', hf, `Merge branch '${hf}' into develop`, lead);
+  drop(hf);
 }
 
-// Work in progress at the end: open features, local branches ahead of origin.
+// v0.2.0: three features side by side, one catches up with develop.
+open('feature/auth'); open('feature/dashboard');
+work('feature/auth'); work('feature/dashboard'); work('feature/auth');
+open('feature/notifications');
+work('feature/dashboard', 2); work('feature/notifications'); work('feature/auth');
+land('feature/auth');
+work('feature/dashboard'); work('feature/notifications');
+catchUp('feature/notifications'); work('feature/notifications');
+land('feature/dashboard'); land('feature/notifications');
+release(2, () => { open('feature/dark-mode'); work('feature/dark-mode'); chore('Update dependencies'); });
+
+// v0.3.0: four features, a hotfix on main in the middle.
+work('feature/dark-mode'); open('feature/search'); work('feature/search', 2); work('feature/dark-mode');
+hotfix('login-crash', '0.2.1', PEOPLE[2], 'Fix crash when session cookie is missing');
+open('feature/export-csv'); work('feature/export-csv'); work('feature/search');
+catchUp('feature/dark-mode'); work('feature/dark-mode'); land('feature/dark-mode');
+open('feature/i18n-thai'); work('feature/i18n-thai', 2); work('feature/export-csv', 2);
+land('feature/search');
+work('feature/i18n-thai'); catchUp('feature/export-csv'); work('feature/export-csv');
+land('feature/export-csv'); land('feature/i18n-thai');
+commitTo('develop', 'Remove the old unused workflow', [{ op: 'D', path: '.github/workflows/ci.yml' }], { who: PEOPLE[4] });
+release(3, () => chore('Tidy lint warnings', PEOPLE[5]));
+
+// v0.4.0: a rename lands first, then four features and a second hotfix.
+commitTo('develop', 'Rename app.ts to main-app.ts', [{ op: 'R', from: 'src/app.ts', to: 'src/main-app.ts' }], { who: PEOPLE[0] });
+open('feature/payments'); open('feature/profile');
+work('feature/payments'); work('feature/profile', 2);
+open('feature/charts'); work('feature/charts'); work('feature/payments', 2);
+land('feature/profile');
+open('feature/onboarding'); work('feature/charts', 2); work('feature/onboarding');
+catchUp('feature/payments'); work('feature/payments');
+land('feature/charts');
+work('feature/onboarding', 2);
+hotfix('payment-rounding', '0.3.1', PEOPLE[2], 'Fix rounding error in payment totals');
+land('feature/payments'); catchUp('feature/onboarding'); work('feature/onboarding'); land('feature/onboarding');
+release(4, () => { chore('Add pull request template', PEOPLE[3]); chore('Document the release process', PEOPLE[3]); });
+commitTo('develop', 'Update the logo', [{ op: 'M', path: 'assets/logo.png', content: png(520) }], { who: PEOPLE[3] });
+
+// Now: two features land, release/0.5 is cut, three more are still open.
+open('feature/settings'); open('feature/audit-log');
+work('feature/settings'); work('feature/audit-log', 2); work('feature/settings');
+open('feature/reports'); work('feature/reports');
+catchUp('feature/audit-log'); work('feature/audit-log');
+land('feature/settings');
+open('feature/mobile-nav'); work('feature/reports'); work('feature/mobile-nav', 2);
+land('feature/audit-log');
 const remote = {};
-for (const x of ['reports', 'mobile-nav']) {
-  const br = `feature/${x}`;
-  branchOff(br, 'develop');
-  for (let k = 0; k < 3; k++) { featureCommit(br, x); if (k === 1) remote[br] = branches.get(br).mark; }
-}
+branchOff('release/0.5', 'develop');
+commitTo('release/0.5', 'Bump version to 0.5.0', [bump('0.5.0')], { who: lead });
+work('feature/reports'); remote['feature/reports'] = branches.get('feature/reports').mark;
+open('feature/offline-mode'); work('feature/offline-mode', 2);
+remote['feature/offline-mode'] = branches.get('feature/offline-mode').mark; drop('feature/offline-mode');   // pushed, never checked out here
+work('feature/mobile-nav'); catchUp('feature/mobile-nav'); work('feature/mobile-nav');
+commitTo('release/0.5', 'Update CHANGELOG for 0.5.0', [edit(branches.get('release/0.5').files, 'CHANGELOG.md', '## 0.5.0')], { who: lead });
+remote['release/0.5'] = branches.get('release/0.5').mark;
+remote['feature/mobile-nav'] = branches.get('feature/mobile-nav').mark;
+chore('Upgrade TypeScript to 5.9', PEOPLE[5]);
+work('feature/reports');
+commitTo('release/0.5', 'Fix typo in the release notes', [edit(branches.get('release/0.5').files, 'CHANGELOG.md', '- fixed a typo')], { who: lead });
 remote.main = branches.get('main').mark;
 remote.develop = branches.get('develop').mark;
 commitTo('develop', 'WIP: unread badge in nav bar', [edit(branches.get('develop').files, 'src/main-app.ts', '// badge')], { who: PEOPLE[0] });
@@ -193,12 +255,11 @@ git(['symbolic-ref', 'HEAD', 'refs/heads/develop']);
 git(['remote', 'add', 'origin', 'https://example.com/acme/webapp.git']);
 git(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
 // Track the pushed branches, so the branch panel has ahead counts to show.
-for (const b of Object.keys(remote)) git(['branch', '-q', `--set-upstream-to=origin/${b}`, b]);
+for (const b of Object.keys(remote)) if (branches.has(b)) git(['branch', '-q', `--set-upstream-to=origin/${b}`, b]);
 git(['reset', '-q', '--hard']);
 
-// Two stashes on develop: a plain WIP stash with an untracked file (-u), then a
-// newer one with a message. Fixed identity and clock keep them identical
-// across runs.
+// One stash on develop: work in progress with an untracked file (-u) and a
+// message. Fixed identity and clock keep it identical across runs.
 const stash = (when, edit, args) => {
   for (const [f, text] of edit) writeFileSync(path.join(out, f), text);
   const t = `${clock + when} +0700`;
@@ -206,8 +267,7 @@ const stash = (when, edit, args) => {
     env: { ...process.env, GIT_AUTHOR_DATE: t, GIT_COMMITTER_DATE: t }, stdio: ['ignore', 'ignore', 'inherit'],
   });
 };
-stash(3600, [['src/main-app.ts', '// draft: badge counter\n'], ['notes-draft.md', 'Scratch notes\n']], ['-u']);
-stash(7200, [['README.md', '# acme-webapp\n\nTry a new theme color\n']], ['-m', 'Try a new theme color']);
+stash(3600, [['src/main-app.ts', '// draft: badge counter\n'], ['notes-draft.md', 'Scratch notes\n']], ['-u', '-m', 'WIP: unread badge counter']);
 
 writeFileSync(MARKER, 'Made by scripts/mock-repo.mjs; safe to delete.\n');
 const count = git(['rev-list', '--count', '--branches', '--remotes', '--tags']).trim();
